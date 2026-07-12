@@ -1,0 +1,59 @@
+name: Build desktop installers
+
+# Builds the Zaim desktop app natively on macOS, Windows and Linux — so the native
+# SQLite module is compiled/verified for each platform (it can't be cross-compiled
+# from a Mac) — then publishes the installers to the `desktop-latest` release.
+#
+# Run from the Actions tab, or push a v* tag. Uses the built-in token — no secrets.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-latest
+          name: Zaim — desktop app
+          prerelease: true
+          body: |
+            Installers for **Zaim**, the secure mail client (webapp + CLI + agent API).
+            - macOS: `.dmg` (Apple Silicon + Intel)
+            - Windows: `.zip`
+            - Linux: `.AppImage`
+            Built natively per-OS so the encrypted SQLite vault runs everywhere.
+
+  build:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14,       flags: --mac --arm64 }   # Apple Silicon
+          - { os: macos-13,       flags: --mac --x64 }     # Intel
+          - { os: windows-latest, flags: --win }
+          - { os: ubuntu-latest,  flags: --linux }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: npm }
+      - run: npm ci
+      - run: npm run build           # next build (standalone)
+      - run: node electron/stage.cjs # stage static/public + drop native from standalone
+      - run: npx electron-builder ${{ matrix.flags }} --publish never
+      - name: Publish installers
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-latest
+          files: |
+            release/*.dmg
+            release/*.zip
+            release/*.AppImage
