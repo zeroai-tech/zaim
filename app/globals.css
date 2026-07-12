@@ -1,0 +1,36 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --bg: #08090d;
+  --panel: #0f1118;
+  --panel-2: #12141c;
+  --line: rgba(255, 255, 255, 0.07);
+  --ink: #e8ebf2;
+  --muted: #8b93a5;
+  --accent: #5b8cff;
+  --accent-2: #8ab4ff;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  font-family: var(--font-sans);
+  color: var(--ink);
+  background:
+    radial-gradient(120% 90% at 100% -10%, rgba(91, 140, 255, 0.10), transparent 55%),
+    radial-gradient(80% 70% at -10% 110%, rgba(138, 180, 255, 0.06), transparent 50%),
+    var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.14); }
+
+.glass { background: rgba(18, 20, 28, 0.7); backdrop-filter: blur(14px); border: 1px solid var(--line); }
+.hairline { border-color: var(--line); }
+.accent-grad { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+.fade-in { animation: fade 0.35s ease both; }
+@keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
