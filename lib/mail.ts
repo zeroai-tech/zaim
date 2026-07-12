@@ -1,7 +1,7 @@
 import { ImapFlow } from 'imapflow'
 import nodemailer from 'nodemailer'
 import { simpleParser } from 'mailparser'
-import { getAccount } from './config'
+import type { MailAccount } from './config'
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  The mail engine — the same proven imapflow + nodemailer + mailparser core the
@@ -25,8 +25,8 @@ export interface MailFull extends MailSummary {
   text: string | null
 }
 
-async function withImap<T>(fn: (c: ImapFlow) => Promise<T>): Promise<T> {
-  const { imap } = getAccount()
+async function withImap<T>(account: MailAccount, fn: (c: ImapFlow) => Promise<T>): Promise<T> {
+  const { imap } = account
   const client = new ImapFlow({
     host: imap.host, port: imap.port, secure: imap.secure,
     auth: { user: imap.user, pass: imap.pass },
@@ -39,8 +39,8 @@ async function withImap<T>(fn: (c: ImapFlow) => Promise<T>): Promise<T> {
 const addrText = (a: any): string => (a?.text || a?.value?.[0]?.address || '')
 const addrName = (a: any): string => (a?.value?.[0]?.name || a?.value?.[0]?.address || a?.text || '')
 
-export async function listMailbox(mailbox = 'INBOX', limit = 40): Promise<MailSummary[]> {
-  return withImap(async (c) => {
+export async function listMailbox(account: MailAccount, mailbox = "INBOX", limit = 40): Promise<MailSummary[]> {
+  return withImap(account, async (c) => {
     const lock = await c.getMailboxLock(mailbox)
     try {
       const total = (c.mailbox && typeof c.mailbox === 'object' ? c.mailbox.exists : 0) || 0
@@ -65,8 +65,8 @@ export async function listMailbox(mailbox = 'INBOX', limit = 40): Promise<MailSu
   })
 }
 
-export async function getMessage(uid: number, mailbox = 'INBOX'): Promise<MailFull | null> {
-  return withImap(async (c) => {
+export async function getMessage(account: MailAccount, uid: number, mailbox = "INBOX"): Promise<MailFull | null> {
+  return withImap(account, async (c) => {
     const lock = await c.getMailboxLock(mailbox)
     try {
       const msg = await c.fetchOne(String(uid), { uid: true, source: true }, { uid: true })
@@ -91,8 +91,8 @@ export async function getMessage(uid: number, mailbox = 'INBOX'): Promise<MailFu
 }
 
 export interface SendInput { to: string; subject: string; html?: string; text?: string; cc?: string; bcc?: string; replyTo?: string }
-export async function sendMail(input: SendInput): Promise<{ messageId: string }> {
-  const { smtp, from, replyTo } = getAccount()
+export async function sendMail(account: MailAccount, input: SendInput): Promise<{ messageId: string }> {
+  const { smtp, from, replyTo } = account
   const t = nodemailer.createTransport({
     host: smtp.host, port: smtp.port, secure: smtp.secure,
     auth: { user: smtp.user, pass: smtp.pass },
@@ -107,11 +107,11 @@ export async function sendMail(input: SendInput): Promise<{ messageId: string }>
   return { messageId: info.messageId }
 }
 
-export async function verify(): Promise<{ imap: boolean; smtp: boolean; error?: string }> {
+export async function verify(account: MailAccount): Promise<{ imap: boolean; smtp: boolean; error?: string }> {
   const res = { imap: false, smtp: false as boolean, error: undefined as string | undefined }
-  try { await withImap(async () => {}); res.imap = true } catch (e) { res.error = 'IMAP: ' + (e as Error).message }
+  try { await withImap(account, async () => {}); res.imap = true } catch (e) { res.error = 'IMAP: ' + (e as Error).message }
   try {
-    const { smtp } = getAccount()
+    const { smtp } = account
     const t = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.secure, auth: { user: smtp.user, pass: smtp.pass } })
     await t.verify(); res.smtp = true
   } catch (e) { res.error = (res.error ? res.error + ' | ' : '') + 'SMTP: ' + (e as Error).message }
