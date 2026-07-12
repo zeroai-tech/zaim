@@ -12,7 +12,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "cli": "node ./bin/zaim.mjs"
+    "cli": "node ./bin/zaim.mjs",
+    "desktop:dev": "next build && electron .",
+    "desktop:dist": "next build && electron-builder"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
@@ -24,6 +26,7 @@
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^22.10.0",
@@ -31,8 +34,37 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "autoprefixer": "^10.4.20",
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2"
+  },
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "tech.zeroai.zaim",
+    "productName": "Zaim",
+    "files": [
+      "electron/**",
+      ".next/standalone/**",
+      ".next/static/**",
+      "public/**",
+      "package.json"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "mac": {
+      "icon": "public/icon.png",
+      "target": "zip"
+    },
+    "win": {
+      "icon": "public/icon.png",
+      "target": "zip"
+    },
+    "linux": {
+      "icon": "public/icon.png",
+      "target": "AppImage"
+    }
   }
 }

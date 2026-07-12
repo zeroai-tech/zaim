@@ -8,3 +8,5 @@ node_modules/
 
 zaim.db
 zaim.db-*
+
+release/
