@@ -28,6 +28,7 @@ export default function Zaim() {
   const [selUid, setSelUid] = useState<number | null>(null)
   const [listLoading, setListLoading] = useState(false)
   const [compose, setCompose] = useState<null | { to: string; subject: string; body: string; sending?: boolean; error?: string }>(null)
+  const [showKeys, setShowKeys] = useState(false)
 
   const refreshMe = useCallback(async () => {
     const me = await api('/api/auth/me')
@@ -78,6 +79,7 @@ export default function Zaim() {
           </div>
           <div className="flex gap-2 mt-2">
             <button onClick={() => setPhase('add-account')} className="text-[11px] text-[color:var(--muted)] hover:text-white">+ mailbox</button>
+            <button onClick={() => setShowKeys(true)} className="text-[11px] text-[color:var(--muted)] hover:text-white">🔑 Agent keys</button>
             <button onClick={logout} className="text-[11px] text-[color:var(--muted)] hover:text-white ml-auto">Sign out</button>
           </div>
         </div>
@@ -127,6 +129,72 @@ export default function Zaim() {
       </main>
 
       {compose && <Compose c={compose} set={setCompose} onSend={send} onClose={() => setCompose(null)} />}
+      {showKeys && <Keys accounts={accounts} onClose={() => setShowKeys(false)} />}
+    </div>
+  )
+}
+
+type KeyRow = { id: string; label: string; account_id: string | null; created_at: number; last_used: number | null }
+function Keys({ accounts, onClose }: { accounts: Account[]; onClose: () => void }) {
+  const [keys, setKeys] = useState<KeyRow[]>([])
+  const [label, setLabel] = useState(''); const [acct, setAcct] = useState('')
+  const [fresh, setFresh] = useState<{ label: string; secret: string } | null>(null)
+  const [busy, setBusy] = useState(false); const [copied, setCopied] = useState(false)
+  const reload = useCallback(() => { api('/api/keys').then((r) => setKeys(r.keys || [])) }, [])
+  useEffect(() => { reload() }, [reload])
+  async function mint() {
+    setBusy(true)
+    const r = await api('/api/keys', { method: 'POST', body: JSON.stringify({ label: label || 'Agent key', accountId: acct || undefined }) })
+    setBusy(false)
+    if (r.ok) { setFresh({ label: r.label, secret: r.secret }); setLabel(''); reload() }
+  }
+  async function revoke(id: string) { await api(`/api/keys/${id}`, { method: 'DELETE' }); reload() }
+  return (
+    <div className="fixed inset-0 grid place-items-center bg-black/50 backdrop-blur-sm z-50 p-6" onClick={onClose}>
+      <div className="glass rounded-2xl w-full max-w-lg fade-in" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 h-12" style={{ borderBottom: '1px solid var(--line)' }}>
+          <span className="font-bold text-sm">🔑 Agent keys</span><button onClick={onClose} className="text-[color:var(--muted)] hover:text-white">✕</button>
+        </div>
+        <div className="p-5 flex flex-col gap-4">
+          <p className="text-xs text-[color:var(--muted)] -mt-1">Give Claude Code, Codex or the <code>zaim</code> CLI a key so they can read + send from your mailbox. Each key is shown once — store it safely; revoke anytime.</p>
+
+          {fresh ? (
+            <div className="rounded-xl p-4" style={{ background: 'var(--panel-2)', border: '1px solid var(--accent)' }}>
+              <div className="text-xs font-semibold mb-2">New key “{fresh.label}” — copy it now, it won’t be shown again:</div>
+              <div className="flex gap-2">
+                <code className="flex-1 text-[11px] break-all bg-black/30 rounded-lg px-3 py-2 leading-relaxed">{fresh.secret}</code>
+                <button onClick={() => { navigator.clipboard?.writeText(fresh.secret); setCopied(true); setTimeout(() => setCopied(false), 1500) }} className="shrink-0 accent-grad text-white text-xs font-bold px-3 rounded-lg">{copied ? '✓' : 'Copy'}</button>
+              </div>
+              <button onClick={() => setFresh(null)} className="text-[11px] text-[color:var(--muted)] hover:text-white mt-3">Done</button>
+            </div>
+          ) : (
+            <div className="flex gap-2">
+              <input className={field + ' flex-1'} style={{ borderColor: 'var(--line)' }} placeholder="Key name (e.g. Claude Code)" value={label} onChange={(e) => setLabel(e.target.value)} />
+              {accounts.length > 1 && (
+                <select className={field + ' flex-1'} style={{ borderColor: 'var(--line)' }} value={acct} onChange={(e) => setAcct(e.target.value)}>
+                  <option value="">Default mailbox</option>
+                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+                </select>
+              )}
+              <button disabled={busy} onClick={mint} className="accent-grad text-white font-bold rounded-xl px-4 text-sm disabled:opacity-50 shrink-0">{busy ? '…' : 'Generate'}</button>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2">
+            {keys.length === 0 && <div className="text-xs text-[color:var(--muted)]">No keys yet.</div>}
+            {keys.map((k) => (
+              <div key={k.id} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: 'var(--panel-2)' }}>
+                <span className="w-7 h-7 rounded-lg grid place-items-center text-xs" style={{ background: 'var(--line)' }}>🔑</span>
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs font-semibold truncate">{k.label}</div>
+                  <div className="text-[10px] text-[color:var(--muted)]">{k.last_used ? `last used ${when(new Date(k.last_used).toISOString())}` : 'never used'}{k.account_id ? '' : ' · default mailbox'}</div>
+                </div>
+                <button onClick={() => revoke(k.id)} className="text-[11px] text-red-400 hover:text-red-300 shrink-0">Revoke</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

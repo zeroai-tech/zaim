@@ -2,7 +2,7 @@ import crypto from 'node:crypto'
 import { getAccount, isConfigured, type MailAccount } from './config'
 import { apiKey } from './auth'
 import { userIdFromReq } from './session'
-import { resolveAccount } from './store'
+import { resolveAccount, findByApiKey } from './store'
 
 // Resolve which mail account a request acts on:
 //   · a logged-in web user → their chosen/default vault account (multi-tenant)
@@ -18,13 +18,24 @@ export function resolveForRequest(req: Request): { ok: true; ctx: Resolved } | {
     if (!account) return { ok: false, status: 409, error: 'No mail account yet — add one first.' }
     return { ok: true, ctx: { account, userId: uid } }
   }
-  // Agent / CLI: shared API key → env single-account
-  const key = apiKey()
+  // Agent / CLI: an API key in the Bearer header (or zaim_key cookie).
   const auth = req.headers.get('authorization') || ''
   const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : ''
   const cookieKey = (req.headers.get('cookie') || '').match(/(?:^|;\s*)zaim_key=([^;]+)/)?.[1]
   const provided = bearer || (cookieKey ? decodeURIComponent(cookieKey) : '')
-  if (key && provided && provided.length === key.length && crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(key))) {
+  if (!provided) return { ok: false, status: 401, error: 'Unauthorized' }
+
+  // 1) Per-user key from the vault (front-end generated) → that user's mailbox.
+  const owner = findByApiKey(provided)
+  if (owner) {
+    const account = resolveAccount(owner.userId, owner.accountId || undefined)
+    if (!account) return { ok: false, status: 409, error: 'API key has no mailbox — connect one in Zaim.' }
+    return { ok: true, ctx: { account, userId: owner.userId } }
+  }
+
+  // 2) Legacy shared env key → env single-account (single-deployment / fallback).
+  const key = apiKey()
+  if (key && provided.length === key.length && crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(key))) {
     if (!isConfigured()) return { ok: false, status: 503, error: 'Server single-account not configured.' }
     return { ok: true, ctx: { account: getAccount(), userId: null } }
   }

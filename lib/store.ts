@@ -27,6 +27,11 @@ function db(): Database.Database {
       from_name TEXT, from_email TEXT, reply_to TEXT, is_default INTEGER DEFAULT 0, created_at INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, label TEXT, key_hash TEXT UNIQUE NOT NULL,
+      account_id TEXT, created_at INTEGER NOT NULL, last_used INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_keys_hash ON api_keys(key_hash);
   `)
   return _db
 }
@@ -99,3 +104,29 @@ export function resolveAccount(userId: string, accountId?: string): MailAccount 
   }
 }
 export const usesVault = (): boolean => !!process.env.ZAIM_ENC_KEY || process.env.ZAIM_MULTIUSER === '1'
+
+// ── Per-user API keys (agent access) ─────────────────────────────────────────
+// The raw key is high-entropy random, so a fast SHA-256 hash is stored (shown
+// once, never recoverable). An optional account_id pins the key to one mailbox.
+export interface ApiKeyRow { id: string; user_id: string; label: string; account_id: string | null; created_at: number; last_used: number | null }
+const hashKey = (raw: string) => crypto.createHash('sha256').update(raw).digest('hex')
+
+export function createApiKey(userId: string, label?: string, accountId?: string): { row: ApiKeyRow; secret: string } {
+  const secret = 'zaim_' + crypto.randomBytes(24).toString('hex')
+  const row: ApiKeyRow = { id: id(), user_id: userId, label: label || 'Agent key', account_id: accountId || null, created_at: Date.now(), last_used: null }
+  db().prepare('INSERT INTO api_keys (id,user_id,label,key_hash,account_id,created_at) VALUES (?,?,?,?,?,?)')
+    .run(row.id, row.user_id, row.label, hashKey(secret), row.account_id, row.created_at)
+  return { row, secret }
+}
+export const listApiKeys = (userId: string): ApiKeyRow[] =>
+  db().prepare('SELECT id,user_id,label,account_id,created_at,last_used FROM api_keys WHERE user_id = ? ORDER BY created_at DESC').all(userId) as ApiKeyRow[]
+export function revokeApiKey(userId: string, keyId: string) {
+  db().prepare('DELETE FROM api_keys WHERE id = ? AND user_id = ?').run(keyId, userId)
+}
+// Resolve a raw agent key → the owning user + pinned account (timing-safe via hash lookup).
+export function findByApiKey(raw: string): { userId: string; accountId: string | null } | null {
+  const r = db().prepare('SELECT id,user_id,account_id FROM api_keys WHERE key_hash = ?').get(hashKey(raw)) as { id: string; user_id: string; account_id: string | null } | undefined
+  if (!r) return null
+  db().prepare('UPDATE api_keys SET last_used = ? WHERE id = ?').run(Date.now(), r.id)
+  return { userId: r.user_id, accountId: r.account_id }
+}
