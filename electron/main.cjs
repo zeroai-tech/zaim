@@ -8,7 +8,9 @@ const fs = require('node:fs')
 const crypto = require('node:crypto')
 const http = require('node:http')
 
-const ROOT = app.isPackaged ? process.resourcesPath : path.join(__dirname, '..')
+// main.cjs lives at <root>/electron/main.cjs in both dev and the packaged app
+// (electron-builder places app files under Resources/app/), so root is one up.
+const ROOT = path.join(__dirname, '..')
 const STANDALONE = path.join(ROOT, '.next', 'standalone')
 const SERVER = path.join(STANDALONE, 'server.js')
 const PORT = 34117

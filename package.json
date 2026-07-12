@@ -14,7 +14,7 @@
     "lint": "next lint",
     "cli": "node ./bin/zaim.mjs",
     "desktop:dev": "next build && electron .",
-    "desktop:dist": "next build && electron-builder"
+    "desktop:dist": "next build && node electron/stage.cjs && electron-builder"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
@@ -44,27 +44,64 @@
   "build": {
     "appId": "tech.zeroai.zaim",
     "productName": "Zaim",
+    "copyright": "© ZeroAI Technologies",
+    "asar": false,
     "files": [
       "electron/**",
       ".next/standalone/**",
-      ".next/static/**",
-      "public/**",
-      "package.json"
+      "package.json",
+      "!**/*.map"
     ],
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "mac": {
-      "icon": "public/icon.png",
-      "target": "zip"
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "dmg": {
+      "title": "Zaim"
     },
     "win": {
-      "icon": "public/icon.png",
-      "target": "zip"
+      "target": [
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
     },
     "linux": {
-      "icon": "public/icon.png",
-      "target": "AppImage"
-    }
+      "category": "Office",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "publish": null
   }
 }
