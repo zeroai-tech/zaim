@@ -129,7 +129,8 @@ export async function getMessage(account: MailAccount, uid: number, mailbox = "I
   })
 }
 
-export interface SendInput { to: string; subject: string; html?: string; text?: string; cc?: string; bcc?: string; replyTo?: string }
+export interface SendAttachment { filename: string; content: string; encoding?: string; contentType?: string }
+export interface SendInput { to: string; subject: string; html?: string; text?: string; cc?: string; bcc?: string; replyTo?: string; attachments?: SendAttachment[] }
 export async function sendMail(account: MailAccount, input: SendInput): Promise<{ messageId: string }> {
   const { smtp, from, replyTo } = account
   const t = nodemailer.createTransport({
@@ -142,6 +143,9 @@ export async function sendMail(account: MailAccount, input: SendInput): Promise<
     replyTo: input.replyTo || replyTo,
     subject: input.subject,
     html: input.html, text: input.text || (input.html ? undefined : ''),
+    attachments: (input.attachments || []).map((a) => ({
+      filename: a.filename, content: a.content, encoding: a.encoding || 'base64', contentType: a.contentType,
+    })),
   })
   return { messageId: info.messageId }
 }

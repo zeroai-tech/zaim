@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 
 type Msg = { uid: number; subject: string; from: string; fromName: string; to: string; date: string; seen: boolean; flagged: boolean }
 type Full = Msg & { html: string | null; text: string | null }
@@ -35,7 +35,7 @@ export default function Zaim() {
   const [sel, setSel] = useState<Full | null>(null)
   const [selUid, setSelUid] = useState<number | null>(null)
   const [listLoading, setListLoading] = useState(false)
-  const [compose, setCompose] = useState<null | { to: string; subject: string; body: string; sending?: boolean; error?: string }>(null)
+  const [compose, setCompose] = useState<null | { to: string; subject: string }>(null)
   const [showKeys, setShowKeys] = useState(false)
 
   const refreshMe = useCallback(async () => {
@@ -70,12 +70,6 @@ export default function Zaim() {
     const f = folders.find((x) => x.key === activeFolder)
     const r = await api(`/api/mail/message/${uid}` + q({ mailbox: f?.path || 'INBOX', account: activeAccount }))
     if (r.ok) { setSel(r.message); setMessages((m) => m.map((x) => (x.uid === uid ? { ...x, seen: true } : x))) }
-  }
-  async function send() {
-    if (!compose) return
-    setCompose({ ...compose, sending: true, error: undefined })
-    const r = await api('/api/mail/send' + q({ account: activeAccount }), { method: 'POST', body: JSON.stringify({ to: compose.to, subject: compose.subject, html: `<p>${compose.body.replace(/\n/g, '<br>')}</p>` }) })
-    if (r.ok) setCompose(null); else setCompose({ ...compose, sending: false, error: r.error || 'Send failed' })
   }
   async function logout() { await api('/api/auth/logout', { method: 'POST' }); setPhase('auth'); setMessages([]); setSel(null); setAccounts([]) }
 
@@ -113,7 +107,7 @@ export default function Zaim() {
           </div>
         )}
 
-        <button onClick={() => setCompose({ to: '', subject: '', body: '' })} className="accent-grad text-white font-bold rounded-xl py-2.5 text-sm mb-3 hover:opacity-90 transition">✏️  Compose</button>
+        <button onClick={() => setCompose({ to: '', subject: '' })} className="accent-grad text-white font-bold rounded-xl py-2.5 text-sm mb-3 hover:opacity-90 transition">✏️  Compose</button>
 
         {folders.map((f) => (
           <button key={f.key} onClick={() => setActiveFolder(f.key)} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer text-left ${activeFolder === f.key ? 'bg-white/5 text-white font-semibold' : 'text-[color:var(--muted)] hover:bg-white/5'}`}>
@@ -165,7 +159,7 @@ export default function Zaim() {
                 <span className="w-10 h-10 rounded-full grid place-items-center text-sm font-bold text-white" style={{ background: avatarColor(sel.fromName || sel.from) }}>{initials(sel.fromName || sel.from)}</span>
                 <div className="min-w-0"><div className="text-sm font-semibold truncate">{sel.fromName || sel.from}</div><div className="text-xs text-[color:var(--muted)] truncate">{sel.from} · to {sel.to}</div></div>
                 <span className="ml-auto text-xs text-[color:var(--muted)]">{new Date(sel.date).toLocaleString()}</span>
-                <button onClick={() => setCompose({ to: sel.from.replace(/.*<|>.*/g, ''), subject: 'Re: ' + sel.subject, body: '' })} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10">↩ Reply</button>
+                <button onClick={() => setCompose({ to: sel.from.replace(/.*<|>.*/g, ''), subject: 'Re: ' + sel.subject })} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10">↩ Reply</button>
               </div>
             </header>
             <iframe title="message" sandbox="" className="flex-1 w-full bg-white" srcDoc={sel.html || `<pre style="font-family:system-ui;white-space:pre-wrap;padding:24px;color:#111">${(sel.text || '').replace(/</g, '&lt;')}</pre>`} />
@@ -173,7 +167,7 @@ export default function Zaim() {
         )}
       </main>
 
-      {compose && <Compose c={compose} set={setCompose} onSend={send} onClose={() => setCompose(null)} from={active?.email} />}
+      {compose && <Compose initial={compose} from={active?.email} account={activeAccount} onClose={() => setCompose(null)} onSent={() => { setCompose(null); load() }} />}
       {showKeys && <Keys accounts={accounts} onClose={() => setShowKeys(false)} />}
     </div>
   )
@@ -355,17 +349,93 @@ function AddAccount({ onDone, email, canCancel, onCancel }: { onDone: () => void
   )
 }
 
-function Compose({ c, set, onSend, onClose, from }: { c: { to: string; subject: string; body: string; sending?: boolean; error?: string }; set: (v: any) => void; onSend: () => void; onClose: () => void; from?: string }) {
+type Att = { name: string; size: number; content: string; contentType: string }
+const fmtSize = (n: number) => (n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB')
+const readB64 = (f: File) => new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res((r.result as string).split(',')[1] || ''); r.readAsDataURL(f) })
+
+function Compose({ initial, from, account, onClose, onSent }: { initial: { to: string; subject: string }; from?: string; account: string; onClose: () => void; onSent: () => void }) {
+  const [to, setTo] = useState(initial.to); const [cc, setCc] = useState(''); const [bcc, setBcc] = useState('')
+  const [subject, setSubject] = useState(initial.subject)
+  const [showCc, setShowCc] = useState(false); const [showBcc, setShowBcc] = useState(false)
+  const [atts, setAtts] = useState<Att[]>([])
+  const [sending, setSending] = useState(false); const [error, setError] = useState('')
+  const ed = useRef<HTMLDivElement>(null); const fileIn = useRef<HTMLInputElement>(null)
+
+  const exec = (cmd: string, val?: string) => { document.execCommand(cmd, false, val); ed.current?.focus() }
+  async function addFiles(files: FileList | null) {
+    if (!files) return
+    const next: Att[] = []
+    for (const f of Array.from(files)) next.push({ name: f.name, size: f.size, content: await readB64(f), contentType: f.type || 'application/octet-stream' })
+    setAtts((a) => [...a, ...next])
+  }
+  async function send() {
+    setError(''); setSending(true)
+    const html = ed.current?.innerHTML || ''
+    const r = await api('/api/mail/send' + q({ account }), { method: 'POST', body: JSON.stringify({
+      to, cc: cc || undefined, bcc: bcc || undefined, subject, html,
+      attachments: atts.map((a) => ({ filename: a.name, content: a.content, contentType: a.contentType })),
+    }) })
+    setSending(false)
+    if (r.ok) onSent(); else setError(r.error || 'Send failed')
+  }
+  const line = 'bg-transparent border-b pb-2 text-sm outline-none focus:border-[color:var(--accent)] w-full'
+  const tbtn = 'w-8 h-8 rounded-lg grid place-items-center text-[color:var(--muted)] hover:text-white hover:bg-white/5 text-sm'
+
   return (
     <div className="fixed inset-0 grid place-items-center bg-black/50 backdrop-blur-sm z-50 p-6" onClick={onClose}>
-      <div className="glass rounded-2xl w-full max-w-2xl fade-in" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 h-12" style={{ borderBottom: '1px solid var(--line)' }}><span className="font-bold text-sm">New message{from ? ` · from ${from}` : ''}</span><button onClick={onClose} className="text-[color:var(--muted)] hover:text-white">✕</button></div>
-        <div className="p-5 flex flex-col gap-3">
-          <input value={c.to} onChange={(e) => set({ ...c, to: e.target.value })} placeholder="To" className="bg-transparent border-b pb-2 text-sm outline-none focus:border-[color:var(--accent)]" style={{ borderColor: 'var(--line)' }} />
-          <input value={c.subject} onChange={(e) => set({ ...c, subject: e.target.value })} placeholder="Subject" className="bg-transparent border-b pb-2 text-sm outline-none focus:border-[color:var(--accent)]" style={{ borderColor: 'var(--line)' }} />
-          <textarea value={c.body} onChange={(e) => set({ ...c, body: e.target.value })} placeholder="Write your message…" rows={10} className="bg-transparent text-sm outline-none resize-none leading-relaxed" />
-          {c.error && <p className="text-xs text-red-400">{c.error}</p>}
-          <div className="flex items-center gap-3"><button disabled={c.sending || !c.to} onClick={onSend} className="accent-grad text-white font-bold rounded-xl px-6 py-2.5 text-sm disabled:opacity-50">{c.sending ? 'Sending…' : 'Send'}</button><span className="text-xs text-[color:var(--muted)]">Encrypted transport · sends from your account</span></div>
+      <div className="glass rounded-2xl w-full max-w-2xl fade-in flex flex-col max-h-[88vh]" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 h-12 shrink-0" style={{ borderBottom: '1px solid var(--line)' }}>
+          <span className="font-bold text-sm">New message{from ? ` · from ${from}` : ''}</span>
+          <button onClick={onClose} className="text-[color:var(--muted)] hover:text-white">✕</button>
+        </div>
+        <div className="p-5 flex flex-col gap-3 overflow-y-auto">
+          <div className="flex items-center gap-2" style={{ borderBottom: '1px solid var(--line)' }}>
+            <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="To" className={line} style={{ border: 'none' }} />
+            <div className="flex gap-2 text-[11px] shrink-0">
+              {!showCc && <button onClick={() => setShowCc(true)} className="text-[color:var(--muted)] hover:text-white">Cc</button>}
+              {!showBcc && <button onClick={() => setShowBcc(true)} className="text-[color:var(--muted)] hover:text-white">Bcc</button>}
+            </div>
+          </div>
+          {showCc && <input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="Cc" className={line} style={{ borderColor: 'var(--line)' }} autoFocus />}
+          {showBcc && <input value={bcc} onChange={(e) => setBcc(e.target.value)} placeholder="Bcc" className={line} style={{ borderColor: 'var(--line)' }} autoFocus />}
+          <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className={line} style={{ borderColor: 'var(--line)' }} />
+
+          {/* formatting toolbar */}
+          <div className="flex items-center gap-0.5 -mb-1">
+            <button onClick={() => exec('bold')} className={tbtn + ' font-bold'} title="Bold">B</button>
+            <button onClick={() => exec('italic')} className={tbtn + ' italic'} title="Italic">I</button>
+            <button onClick={() => exec('underline')} className={tbtn + ' underline'} title="Underline">U</button>
+            <span className="w-px h-4 mx-1" style={{ background: 'var(--line)' }} />
+            <button onClick={() => exec('insertUnorderedList')} className={tbtn} title="Bulleted list">•</button>
+            <button onClick={() => exec('insertOrderedList')} className={tbtn} title="Numbered list">1.</button>
+            <button onClick={() => { const u = prompt('Link URL:'); if (u) exec('createLink', u) }} className={tbtn} title="Insert link">🔗</button>
+            <span className="w-px h-4 mx-1" style={{ background: 'var(--line)' }} />
+            <button onClick={() => fileIn.current?.click()} className={tbtn} title="Attach files">📎</button>
+          </div>
+
+          <div ref={ed} contentEditable suppressContentEditableWarning data-ph="Write your message…"
+            className="zaim-editor min-h-[180px] max-h-[38vh] overflow-y-auto text-sm outline-none leading-relaxed rounded-xl px-3 py-3"
+            style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }} />
+
+          {/* attachments */}
+          <input ref={fileIn} type="file" multiple className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = '' }} />
+          {atts.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {atts.map((a, i) => (
+                <div key={i} className="flex items-center gap-2 rounded-lg pl-2.5 pr-2 py-1.5 text-xs" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }}>
+                  <span>📎</span><span className="max-w-[180px] truncate font-medium">{a.name}</span>
+                  <span className="text-[color:var(--muted)]">{fmtSize(a.size)}</span>
+                  <button onClick={() => setAtts((x) => x.filter((_, j) => j !== i))} className="text-[color:var(--muted)] hover:text-red-400 ml-0.5">✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+          {error && <p className="text-xs text-red-400">{error}</p>}
+        </div>
+        <div className="flex items-center gap-3 px-5 py-4 shrink-0" style={{ borderTop: '1px solid var(--line)' }}>
+          <button disabled={sending || !to} onClick={send} className="accent-grad text-white font-bold rounded-xl px-6 py-2.5 text-sm disabled:opacity-50">{sending ? 'Sending…' : 'Send'}</button>
+          <button onClick={() => fileIn.current?.click()} className="text-xs text-[color:var(--muted)] hover:text-white">📎 Attach</button>
+          <span className="text-xs text-[color:var(--muted)] ml-auto">Encrypted transport{atts.length ? ` · ${atts.length} file${atts.length > 1 ? 's' : ''}` : ''}</span>
         </div>
       </div>
     </div>
