@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 type Msg = { uid: number; subject: string; from: string; fromName: string; to: string; date: string; seen: boolean; flagged: boolean }
 type Full = Msg & { html: string | null; text: string | null; cc?: string; attachments?: { filename: string; contentType: string; size: number }[] }
 type Att = { name: string; size: number; content: string; contentType: string }
-type ComposeInit = { to: string; subject: string; cc?: string; html?: string; attachments?: Att[] }
+type ComposeInit = { to: string; subject: string; cc?: string; html?: string; attachments?: Att[]; draft?: { uid: number; mailbox: string } }
 type Account = { id: string; label: string; email: string; isDefault: boolean }
 type Folder = { key: string; label: string; icon: string; path: string }
 
@@ -88,7 +88,7 @@ export default function Zaim() {
       attachments.push({ name: meta.filename, size: meta.size, content, contentType: meta.contentType })
     }
     setLoadingDraft(false)
-    setCompose({ to: sel.to, cc: sel.cc, subject: sel.subject, html: sel.html || '', attachments })
+    setCompose({ to: sel.to, cc: sel.cc, subject: sel.subject, html: sel.html || '', attachments, draft: { uid: sel.uid, mailbox } })
   }
   async function logout() { await api('/api/auth/logout', { method: 'POST' }); setPhase('auth'); setMessages([]); setSel(null); setAccounts([]) }
 
@@ -408,6 +408,7 @@ function Compose({ initial, from, account, onClose, onSent }: { initial: Compose
     const r = await api('/api/mail/send' + q({ account }), { method: 'POST', body: JSON.stringify({
       to, cc: cc || undefined, bcc: bcc || undefined, subject, html,
       attachments: atts.map((a) => ({ filename: a.name, content: a.content, contentType: a.contentType })),
+      saveToSent: true, draft: initial.draft,
     }) })
     setSending(false)
     if (r.ok) onSent(); else setError(r.error || 'Send failed')

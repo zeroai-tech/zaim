@@ -1,5 +1,6 @@
 import { ImapFlow } from 'imapflow'
 import nodemailer from 'nodemailer'
+import MailComposer from 'nodemailer/lib/mail-composer/index.js'
 import { simpleParser } from 'mailparser'
 import type { MailAccount } from './config'
 
@@ -153,13 +154,12 @@ export async function getAttachment(account: MailAccount, uid: number, mailbox =
 
 export interface SendAttachment { filename: string; content: string; encoding?: string; contentType?: string }
 export interface SendInput { to: string; subject: string; html?: string; text?: string; cc?: string; bcc?: string; replyTo?: string; attachments?: SendAttachment[] }
-export async function sendMail(account: MailAccount, input: SendInput): Promise<{ messageId: string }> {
-  const { smtp, from, replyTo } = account
-  const t = nodemailer.createTransport({
-    host: smtp.host, port: smtp.port, secure: smtp.secure,
-    auth: { user: smtp.user, pass: smtp.pass },
-  })
-  const info = await t.sendMail({
+
+// Build the full raw MIME once, so the exact same bytes we send can also be
+// saved to the Sent folder.
+function buildRaw(account: MailAccount, input: SendInput): Promise<Buffer> {
+  const { from, replyTo } = account
+  const mc = new MailComposer({
     from: `"${from.name}" <${from.email}>`,
     to: input.to, cc: input.cc, bcc: input.bcc,
     replyTo: input.replyTo || replyTo,
@@ -169,7 +169,35 @@ export async function sendMail(account: MailAccount, input: SendInput): Promise<
       filename: a.filename, content: a.content, encoding: a.encoding || 'base64', contentType: a.contentType,
     })),
   })
-  return { messageId: info.messageId }
+  return new Promise((resolve, reject) => mc.compile().build((e: Error | null, msg: Buffer) => (e ? reject(e) : resolve(msg))))
+}
+
+export async function sendMail(account: MailAccount, input: SendInput): Promise<{ messageId: string; raw: Buffer }> {
+  const { smtp, from } = account
+  const raw = await buildRaw(account, input)
+  const t = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.secure, auth: { user: smtp.user, pass: smtp.pass } })
+  const to = [input.to, input.cc, input.bcc].filter(Boolean).join(',')
+  const info = await t.sendMail({ envelope: { from: from.email, to }, raw })
+  return { messageId: info.messageId, raw }
+}
+
+// Save a copy of an outgoing message into the account's Sent folder.
+export async function appendToSent(account: MailAccount, raw: Buffer): Promise<void> {
+  return withImap(account, async (c) => {
+    const boxes = await c.list()
+    const sent = boxes.find((b) => b.specialUse === '\\Sent')?.path
+      || boxes.find((b) => /(^|[./])sent/i.test(b.path) || /(^|[./])sent/i.test(b.name))?.path
+    if (!sent) return
+    await c.append(sent, raw, ['\\Seen'])
+  })
+}
+
+// Delete a message (used to remove a draft once it's been sent).
+export async function deleteMessage(account: MailAccount, mailbox: string, uid: number): Promise<void> {
+  return withImap(account, async (c) => {
+    const lock = await c.getMailboxLock(mailbox)
+    try { await c.messageDelete(String(uid), { uid: true }) } finally { lock.release() }
+  })
 }
 
 export async function verify(account: MailAccount): Promise<{ imap: boolean; smtp: boolean; error?: string }> {
