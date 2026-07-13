@@ -39,14 +39,53 @@ async function withImap<T>(account: MailAccount, fn: (c: ImapFlow) => Promise<T>
 const addrText = (a: any): string => (a?.text || a?.value?.[0]?.address || '')
 const addrName = (a: any): string => (a?.value?.[0]?.name || a?.value?.[0]?.address || a?.text || '')
 
-export async function listMailbox(account: MailAccount, mailbox = "INBOX", limit = 40): Promise<MailSummary[]> {
+// The named folders a mailbox exposes. Providers disagree on paths (Namecheap:
+// "INBOX.Sent"; Gmail: "[Gmail]/Sent Mail"), so we resolve by IMAP special-use
+// flags first, then by name, and only return folders that actually exist.
+export interface FolderInfo { key: string; label: string; icon: string; path: string }
+export async function listFolders(account: MailAccount): Promise<FolderInfo[]> {
+  return withImap(account, async (c) => {
+    const boxes = await c.list()
+    const find = (special: string, re: RegExp) =>
+      boxes.find((b) => b.specialUse === special)?.path ||
+      boxes.find((b) => re.test(b.path) || re.test(b.name))?.path || ''
+    const all: FolderInfo[] = [
+      { key: 'INBOX', label: 'Inbox', icon: '📥', path: 'INBOX' },
+      { key: 'starred', label: 'Starred', icon: '⭐', path: 'INBOX' }, // flagged view over inbox
+      { key: 'sent', label: 'Sent', icon: '📤', path: find('\\Sent', /(^|[./])sent/i) },
+      { key: 'drafts', label: 'Drafts', icon: '📝', path: find('\\Drafts', /(^|[./])draft/i) },
+      { key: 'archive', label: 'Archive', icon: '🗄️', path: find('\\Archive', /(^|[./])archive/i) },
+      { key: 'junk', label: 'Spam', icon: '⚠️', path: find('\\Junk', /(^|[./])(junk|spam)/i) },
+      { key: 'trash', label: 'Trash', icon: '🗑️', path: find('\\Trash', /(^|[./])(trash|deleted)/i) },
+    ]
+    return all.filter((f) => f.path)
+  })
+}
+
+export async function listMailbox(account: MailAccount, mailbox = "INBOX", limit = 40, opts?: { flaggedOnly?: boolean }): Promise<MailSummary[]> {
   return withImap(account, async (c) => {
     const lock = await c.getMailboxLock(mailbox)
     try {
       const total = (c.mailbox && typeof c.mailbox === 'object' ? c.mailbox.exists : 0) || 0
       if (!total) return []
-      const start = Math.max(1, total - limit + 1)
       const out: MailSummary[] = []
+      // Starred: search this mailbox for flagged messages, newest `limit`.
+      if (opts?.flaggedOnly) {
+        const uids = (await c.search({ flagged: true }, { uid: true })) || []
+        if (!uids.length) return []
+        const pick = uids.slice(-limit)
+        for await (const m of c.fetch(pick, { uid: true, envelope: true, flags: true }, { uid: true })) {
+          const env = m.envelope
+          out.push({
+            uid: m.uid, subject: env?.subject || '(no subject)',
+            from: env?.from?.[0]?.address ?? '', fromName: env?.from?.[0]?.name || env?.from?.[0]?.address || '',
+            to: env?.to?.[0]?.address || '', date: (env?.date || new Date()).toString(),
+            seen: m.flags?.has('\\Seen') ?? false, flagged: true,
+          })
+        }
+        return out.reverse()
+      }
+      const start = Math.max(1, total - limit + 1)
       for await (const m of c.fetch(`${start}:*`, { uid: true, envelope: true, flags: true })) {
         const env = m.envelope
         out.push({
