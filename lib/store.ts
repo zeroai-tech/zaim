@@ -42,12 +42,29 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_keys_hash ON api_keys(key_hash)`,
 ]
 
+// Strip sslmode/ssl query params so the connection string can't force cert
+// verification — we drive SSL ourselves below. (Supabase/Neon present a
+// self-signed chain; `sslmode=require` in the URL would otherwise override our
+// ssl options and throw SELF_SIGNED_CERT_IN_CHAIN.)
+function pgConnString(raw: string): string {
+  try {
+    const u = new URL(raw)
+    u.searchParams.delete('sslmode')
+    u.searchParams.delete('ssl')
+    return u.toString()
+  } catch {
+    return raw.replace(/[?&](sslmode|ssl)=[^&]*/g, '')
+  }
+}
+
 async function makePg(): Promise<Driver> {
   const pg = await import('pg')
   pg.types.setTypeParser(20, (v: string) => parseInt(v, 10)) // bigint(oid 20) → number (ms fits JS safe int)
-  // Managed Postgres (Neon/Supabase/Vercel) requires SSL; a local server has none.
+  // Managed Postgres (Neon/Supabase/Vercel) uses SSL with a self-signed chain; a
+  // local server has none. Verify off for managed (they're reached over a trusted
+  // network path), off entirely for localhost.
   const local = /@(localhost|127\.0\.0\.1|::1)[:\/]/.test(PG_URL) || /sslmode=disable/.test(PG_URL)
-  const pool = new pg.Pool({ connectionString: PG_URL, ssl: local ? false : { rejectUnauthorized: false }, max: 3 })
+  const pool = new pg.Pool({ connectionString: pgConnString(PG_URL), ssl: local ? false : { rejectUnauthorized: false }, max: 3 })
   const d: Driver = {
     async run(sql, p = []) { await pool.query(sql, p as unknown[]) },
     async get<T>(sql: string, p: Params = []) { return (await pool.query(sql, p as unknown[])).rows[0] as T | undefined },
