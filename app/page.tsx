@@ -2,7 +2,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 
 type Msg = { uid: number; subject: string; from: string; fromName: string; to: string; date: string; seen: boolean; flagged: boolean }
-type Full = Msg & { html: string | null; text: string | null; attachments?: { filename: string; contentType: string; size: number }[] }
+type Full = Msg & { html: string | null; text: string | null; cc?: string; attachments?: { filename: string; contentType: string; size: number }[] }
+type Att = { name: string; size: number; content: string; contentType: string }
+type ComposeInit = { to: string; subject: string; cc?: string; html?: string; attachments?: Att[] }
 type Account = { id: string; label: string; email: string; isDefault: boolean }
 type Folder = { key: string; label: string; icon: string; path: string }
 
@@ -35,7 +37,8 @@ export default function Zaim() {
   const [sel, setSel] = useState<Full | null>(null)
   const [selUid, setSelUid] = useState<number | null>(null)
   const [listLoading, setListLoading] = useState(false)
-  const [compose, setCompose] = useState<null | { to: string; subject: string }>(null)
+  const [compose, setCompose] = useState<null | ComposeInit>(null)
+  const [loadingDraft, setLoadingDraft] = useState(false)
   const [showKeys, setShowKeys] = useState(false)
 
   const refreshMe = useCallback(async () => {
@@ -70,6 +73,22 @@ export default function Zaim() {
     const f = folders.find((x) => x.key === activeFolder)
     const r = await api(`/api/mail/message/${uid}` + q({ mailbox: f?.path || 'INBOX', account: activeAccount }))
     if (r.ok) { setSel(r.message); setMessages((m) => m.map((x) => (x.uid === uid ? { ...x, seen: true } : x))) }
+  }
+  // Load a draft (recipient, Cc, body, attachments) into the composer to send.
+  async function editDraft() {
+    if (!sel) return
+    setLoadingDraft(true)
+    const mailbox = folders.find((f) => f.key === activeFolder)?.path || 'INBOX'
+    const attachments: Att[] = []
+    for (let i = 0; i < (sel.attachments?.length || 0); i++) {
+      const meta = sel.attachments![i]
+      const res = await fetch('/api/mail/attachment' + q({ uid: String(sel.uid), mailbox, index: String(i), account: activeAccount }), { credentials: 'include' })
+      const blob = await res.blob()
+      const content = await new Promise<string>((r) => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(',')[1] || ''); fr.readAsDataURL(blob) })
+      attachments.push({ name: meta.filename, size: meta.size, content, contentType: meta.contentType })
+    }
+    setLoadingDraft(false)
+    setCompose({ to: sel.to, cc: sel.cc, subject: sel.subject, html: sel.html || '', attachments })
   }
   async function logout() { await api('/api/auth/logout', { method: 'POST' }); setPhase('auth'); setMessages([]); setSel(null); setAccounts([]) }
 
@@ -159,7 +178,9 @@ export default function Zaim() {
                 <span className="w-10 h-10 rounded-full grid place-items-center text-sm font-bold text-white" style={{ background: avatarColor(sel.fromName || sel.from) }}>{initials(sel.fromName || sel.from)}</span>
                 <div className="min-w-0"><div className="text-sm font-semibold truncate">{sel.fromName || sel.from}</div><div className="text-xs text-[color:var(--muted)] truncate">{sel.from} · to {sel.to}</div></div>
                 <span className="ml-auto text-xs text-[color:var(--muted)]">{new Date(sel.date).toLocaleString()}</span>
-                <button onClick={() => setCompose({ to: sel.from.replace(/.*<|>.*/g, ''), subject: 'Re: ' + sel.subject })} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10">↩ Reply</button>
+                {activeFolder === 'drafts'
+                  ? <button onClick={editDraft} disabled={loadingDraft} className="text-xs font-semibold px-3 py-1.5 rounded-lg accent-grad text-white hover:opacity-90 disabled:opacity-50">{loadingDraft ? 'Loading…' : '✏️ Edit & Send'}</button>
+                  : <button onClick={() => setCompose({ to: sel.from.replace(/.*<|>.*/g, ''), subject: 'Re: ' + sel.subject })} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10">↩ Reply</button>}
               </div>
             </header>
             {sel.attachments && sel.attachments.length > 0 && (
@@ -362,18 +383,18 @@ function AddAccount({ onDone, email, canCancel, onCancel }: { onDone: () => void
   )
 }
 
-type Att = { name: string; size: number; content: string; contentType: string }
 const fmtSize = (n: number) => (n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB')
 const readB64 = (f: File) => new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res((r.result as string).split(',')[1] || ''); r.readAsDataURL(f) })
 
-function Compose({ initial, from, account, onClose, onSent }: { initial: { to: string; subject: string }; from?: string; account: string; onClose: () => void; onSent: () => void }) {
-  const [to, setTo] = useState(initial.to); const [cc, setCc] = useState(''); const [bcc, setBcc] = useState('')
+function Compose({ initial, from, account, onClose, onSent }: { initial: ComposeInit; from?: string; account: string; onClose: () => void; onSent: () => void }) {
+  const [to, setTo] = useState(initial.to); const [cc, setCc] = useState(initial.cc || ''); const [bcc, setBcc] = useState('')
   const [subject, setSubject] = useState(initial.subject)
-  const [showCc, setShowCc] = useState(false); const [showBcc, setShowBcc] = useState(false)
-  const [atts, setAtts] = useState<Att[]>([])
+  const [showCc, setShowCc] = useState(!!initial.cc); const [showBcc, setShowBcc] = useState(false)
+  const [atts, setAtts] = useState<Att[]>(initial.attachments || [])
   const [sending, setSending] = useState(false); const [error, setError] = useState('')
   const ed = useRef<HTMLDivElement>(null); const fileIn = useRef<HTMLInputElement>(null)
 
+  useEffect(() => { if (ed.current && initial.html) ed.current.innerHTML = initial.html }, [initial.html])
   const exec = (cmd: string, val?: string) => { document.execCommand(cmd, false, val); ed.current?.focus() }
   async function addFiles(files: FileList | null) {
     if (!files) return

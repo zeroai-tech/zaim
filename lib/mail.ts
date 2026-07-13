@@ -24,6 +24,7 @@ export interface MailAttachmentMeta { filename: string; contentType: string; siz
 export interface MailFull extends MailSummary {
   html: string | null
   text: string | null
+  cc: string
   attachments: MailAttachmentMeta[]
 }
 
@@ -126,6 +127,7 @@ export async function getMessage(account: MailAccount, uid: number, mailbox = "I
         flagged: false,
         html: parsed.html || null,
         text: parsed.text || null,
+        cc: addrText(parsed.cc),
         attachments: (parsed.attachments || []).map((a) => ({
           filename: a.filename || 'attachment', contentType: a.contentType || 'application/octet-stream', size: a.size || (a.content?.length ?? 0),
         })),
