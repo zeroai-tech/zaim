@@ -20,9 +20,11 @@ export interface MailSummary {
   flagged: boolean
   snippet?: string
 }
+export interface MailAttachmentMeta { filename: string; contentType: string; size: number }
 export interface MailFull extends MailSummary {
   html: string | null
   text: string | null
+  attachments: MailAttachmentMeta[]
 }
 
 async function withImap<T>(account: MailAccount, fn: (c: ImapFlow) => Promise<T>): Promise<T> {
@@ -124,7 +126,25 @@ export async function getMessage(account: MailAccount, uid: number, mailbox = "I
         flagged: false,
         html: parsed.html || null,
         text: parsed.text || null,
+        attachments: (parsed.attachments || []).map((a) => ({
+          filename: a.filename || 'attachment', contentType: a.contentType || 'application/octet-stream', size: a.size || (a.content?.length ?? 0),
+        })),
       }
+    } finally { lock.release() }
+  })
+}
+
+// Fetch one attachment's bytes (by index) for download.
+export async function getAttachment(account: MailAccount, uid: number, mailbox = "INBOX", index = 0): Promise<{ filename: string; contentType: string; content: Buffer } | null> {
+  return withImap(account, async (c) => {
+    const lock = await c.getMailboxLock(mailbox)
+    try {
+      const msg = await c.fetchOne(String(uid), { uid: true, source: true }, { uid: true })
+      if (!msg || !msg.source) return null
+      const parsed = await simpleParser(msg.source as Buffer)
+      const a = (parsed.attachments || [])[index]
+      if (!a) return null
+      return { filename: a.filename || 'attachment', contentType: a.contentType || 'application/octet-stream', content: a.content as Buffer }
     } finally { lock.release() }
   })
 }

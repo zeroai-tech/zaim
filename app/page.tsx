@@ -2,7 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 
 type Msg = { uid: number; subject: string; from: string; fromName: string; to: string; date: string; seen: boolean; flagged: boolean }
-type Full = Msg & { html: string | null; text: string | null }
+type Full = Msg & { html: string | null; text: string | null; attachments?: { filename: string; contentType: string; size: number }[] }
 type Account = { id: string; label: string; email: string; isDefault: boolean }
 type Folder = { key: string; label: string; icon: string; path: string }
 
@@ -162,6 +162,19 @@ export default function Zaim() {
                 <button onClick={() => setCompose({ to: sel.from.replace(/.*<|>.*/g, ''), subject: 'Re: ' + sel.subject })} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10">↩ Reply</button>
               </div>
             </header>
+            {sel.attachments && sel.attachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-8 py-3 shrink-0" style={{ borderBottom: '1px solid var(--line)' }}>
+                {sel.attachments.map((a, i) => (
+                  <a key={i} download href={'/api/mail/attachment' + q({ uid: String(sel.uid), mailbox: folders.find((f) => f.key === activeFolder)?.path || 'INBOX', index: String(i), account: activeAccount })}
+                    className="flex items-center gap-2 rounded-lg pl-2.5 pr-3 py-1.5 text-xs hover:bg-white/5 transition" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }}>
+                    <span className="text-sm">📎</span>
+                    <span className="max-w-[220px] truncate font-medium">{a.filename}</span>
+                    <span className="text-[color:var(--muted)]">{fmtSize(a.size)}</span>
+                    <span className="text-[color:var(--accent)]">↓</span>
+                  </a>
+                ))}
+              </div>
+            )}
             <iframe title="message" sandbox="" className="flex-1 w-full bg-white" srcDoc={sel.html || `<pre style="font-family:system-ui;white-space:pre-wrap;padding:24px;color:#111">${(sel.text || '').replace(/</g, '&lt;')}</pre>`} />
           </div>
         )}
