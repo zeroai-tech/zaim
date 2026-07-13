@@ -76,6 +76,13 @@ const ready = (): Promise<Driver> => (_ready ??= (usePg ? makePg() : makeSqlite(
 
 const id = () => crypto.randomUUID()
 
+// Diagnostic: confirm the DB is reachable + report which backend is active.
+export async function dbPing(): Promise<{ backend: 'postgres' | 'sqlite' }> {
+  const d = await ready()
+  await d.get('SELECT 1 AS one')
+  return { backend: usePg ? 'postgres' : 'sqlite' }
+}
+
 // ── Users ────────────────────────────────────────────────────────────────────
 export interface User { id: string; email: string; pw_hash: string; created_at: number }
 export async function createUser(email: string, pwHash: string): Promise<User> {
