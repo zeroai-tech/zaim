@@ -6,7 +6,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function POST(req: Request) {
-  const r = resolveForRequest(req)
+  const r = await resolveForRequest(req)
   if (!r.ok) return json({ error: r.error }, r.status)
   let body: Record<string, string>
   try { body = await req.json() } catch { return json({ error: 'Invalid JSON body' }, 400) }

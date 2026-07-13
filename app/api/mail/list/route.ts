@@ -6,7 +6,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: Request) {
-  const r = resolveForRequest(req)
+  const r = await resolveForRequest(req)
   if (!r.ok) return json({ error: r.error }, r.status)
   const url = new URL(req.url)
   const mailbox = url.searchParams.get('mailbox') || 'INBOX'

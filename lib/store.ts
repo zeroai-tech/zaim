@@ -1,54 +1,92 @@
-import Database from 'better-sqlite3'
 import path from 'node:path'
 import crypto from 'node:crypto'
 import { encryptSecret, decryptSecret, type MailAccount } from './config'
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  The vault store — users + their mail accounts. Passwords are AES-256-GCM
-//  encrypted at rest (ZAIM_ENC_KEY). SQLite here powers local dev + the desktop
-//  app; the same interface (below) is what a Postgres driver implements for a
-//  Vercel/multi-tenant cloud deploy — the API/UI never touch the driver directly.
+//  The vault store — users, their mail accounts, and agent API keys. Passwords
+//  are AES-256-GCM encrypted at rest (ZAIM_ENC_KEY).
+//
+//  Two interchangeable backends behind one async interface:
+//    · Postgres (pg)   — when POSTGRES_URL / DATABASE_URL is set. For Vercel /
+//                        any serverless multi-tenant deploy (Neon, Supabase, …).
+//    · SQLite (better-sqlite3) — otherwise. For local dev + the desktop app,
+//                        which have a real writable disk.
+//  Serverless (Vercel) has no persistent writable disk, so SQLite can't work
+//  there — set POSTGRES_URL and this transparently uses Postgres instead.
 // ─────────────────────────────────────────────────────────────────────────────
 
-let _db: Database.Database | null = null
-function db(): Database.Database {
-  if (_db) return _db
-  const file = process.env.ZAIM_DB_PATH || path.join(process.cwd(), 'zaim.db')
-  _db = new Database(file)
-  _db.pragma('journal_mode = WAL')
-  _db.exec(`
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, pw_hash TEXT NOT NULL, created_at INTEGER NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS accounts (
-      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, label TEXT NOT NULL,
-      imap_host TEXT, imap_port INTEGER, imap_secure INTEGER, imap_user TEXT, imap_pass TEXT,
-      smtp_host TEXT, smtp_port INTEGER, smtp_secure INTEGER, smtp_user TEXT, smtp_pass TEXT,
-      from_name TEXT, from_email TEXT, reply_to TEXT, is_default INTEGER DEFAULT 0, created_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id);
-    CREATE TABLE IF NOT EXISTS api_keys (
-      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, label TEXT, key_hash TEXT UNIQUE NOT NULL,
-      account_id TEXT, created_at INTEGER NOT NULL, last_used INTEGER
-    );
-    CREATE INDEX IF NOT EXISTS idx_keys_hash ON api_keys(key_hash);
-  `)
-  return _db
+const PG_URL = process.env.POSTGRES_URL || process.env.DATABASE_URL || ''
+const usePg = !!PG_URL
+
+type Params = readonly unknown[]
+interface Driver {
+  run(sql: string, p?: Params): Promise<void>
+  get<T>(sql: string, p?: Params): Promise<T | undefined>
+  all<T>(sql: string, p?: Params): Promise<T[]>
 }
+
+// One shared schema — SQLite treats BIGINT as INTEGER affinity, so it fits both.
+// (Timestamps are ms since epoch → need 64-bit, hence BIGINT not INTEGER on PG.)
+const SCHEMA = [
+  `CREATE TABLE IF NOT EXISTS users (
+     id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, pw_hash TEXT NOT NULL, created_at BIGINT NOT NULL)`,
+  `CREATE TABLE IF NOT EXISTS accounts (
+     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, label TEXT NOT NULL,
+     imap_host TEXT, imap_port INTEGER, imap_secure INTEGER, imap_user TEXT, imap_pass TEXT,
+     smtp_host TEXT, smtp_port INTEGER, smtp_secure INTEGER, smtp_user TEXT, smtp_pass TEXT,
+     from_name TEXT, from_email TEXT, reply_to TEXT, is_default INTEGER DEFAULT 0, created_at BIGINT NOT NULL)`,
+  `CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id)`,
+  `CREATE TABLE IF NOT EXISTS api_keys (
+     id TEXT PRIMARY KEY, user_id TEXT NOT NULL, label TEXT, key_hash TEXT UNIQUE NOT NULL,
+     account_id TEXT, created_at BIGINT NOT NULL, last_used BIGINT)`,
+  `CREATE INDEX IF NOT EXISTS idx_keys_hash ON api_keys(key_hash)`,
+]
+
+async function makePg(): Promise<Driver> {
+  const pg = await import('pg')
+  pg.types.setTypeParser(20, (v: string) => parseInt(v, 10)) // bigint(oid 20) → number (ms fits JS safe int)
+  // Managed Postgres (Neon/Supabase/Vercel) requires SSL; a local server has none.
+  const local = /@(localhost|127\.0\.0\.1|::1)[:\/]/.test(PG_URL) || /sslmode=disable/.test(PG_URL)
+  const pool = new pg.Pool({ connectionString: PG_URL, ssl: local ? false : { rejectUnauthorized: false }, max: 3 })
+  const d: Driver = {
+    async run(sql, p = []) { await pool.query(sql, p as unknown[]) },
+    async get<T>(sql: string, p: Params = []) { return (await pool.query(sql, p as unknown[])).rows[0] as T | undefined },
+    async all<T>(sql: string, p: Params = []) { return (await pool.query(sql, p as unknown[])).rows as T[] },
+  }
+  for (const ddl of SCHEMA) await d.run(ddl)
+  return d
+}
+
+async function makeSqlite(): Promise<Driver> {
+  const { default: Database } = await import('better-sqlite3')
+  const db = new Database(process.env.ZAIM_DB_PATH || path.join(process.cwd(), 'zaim.db'))
+  db.pragma('journal_mode = WAL')
+  const toQ = (sql: string) => sql.replace(/\$\d+/g, '?') // $1,$2… (in order) → positional ?
+  const d: Driver = {
+    async run(sql, p = []) { db.prepare(toQ(sql)).run(...(p as unknown[])) },
+    async get<T>(sql: string, p: Params = []) { return db.prepare(toQ(sql)).get(...(p as unknown[])) as T | undefined },
+    async all<T>(sql: string, p: Params = []) { return db.prepare(toQ(sql)).all(...(p as unknown[])) as T[] },
+  }
+  for (const ddl of SCHEMA) await d.run(ddl)
+  return d
+}
+
+let _ready: Promise<Driver> | null = null
+const ready = (): Promise<Driver> => (_ready ??= (usePg ? makePg() : makeSqlite()))
 
 const id = () => crypto.randomUUID()
 
 // ── Users ────────────────────────────────────────────────────────────────────
 export interface User { id: string; email: string; pw_hash: string; created_at: number }
-export function createUser(email: string, pwHash: string): User {
+export async function createUser(email: string, pwHash: string): Promise<User> {
   const u: User = { id: id(), email: email.toLowerCase(), pw_hash: pwHash, created_at: Date.now() }
-  db().prepare('INSERT INTO users (id,email,pw_hash,created_at) VALUES (?,?,?,?)').run(u.id, u.email, u.pw_hash, u.created_at)
+  await (await ready()).run('INSERT INTO users (id,email,pw_hash,created_at) VALUES ($1,$2,$3,$4)', [u.id, u.email, u.pw_hash, u.created_at])
   return u
 }
-export const findUserByEmail = (email: string): User | undefined =>
-  db().prepare('SELECT * FROM users WHERE email = ?').get(email.toLowerCase()) as User | undefined
-export const findUserById = (uid: string): User | undefined =>
-  db().prepare('SELECT * FROM users WHERE id = ?').get(uid) as User | undefined
+export const findUserByEmail = async (email: string): Promise<User | undefined> =>
+  (await ready()).get<User>('SELECT * FROM users WHERE email = $1', [email.toLowerCase()])
+export const findUserById = async (uid: string): Promise<User | undefined> =>
+  (await ready()).get<User>('SELECT * FROM users WHERE id = $1', [uid])
 
 // ── Accounts (mail credentials, encrypted) ───────────────────────────────────
 export interface AccountRow {
@@ -64,37 +102,33 @@ export interface AccountInput {
   fromName?: string; fromEmail?: string; replyTo?: string
 }
 
-export function addAccount(userId: string, a: AccountInput): string {
-  const rows = listAccounts(userId)
+export async function addAccount(userId: string, a: AccountInput): Promise<string> {
+  const rows = await listAccounts(userId)
   const aid = id()
-  db().prepare(`INSERT INTO accounts
-    (id,user_id,label,imap_host,imap_port,imap_secure,imap_user,imap_pass,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass,from_name,from_email,reply_to,is_default,created_at)
-    VALUES (@id,@user_id,@label,@imap_host,@imap_port,@imap_secure,@imap_user,@imap_pass,@smtp_host,@smtp_port,@smtp_secure,@smtp_user,@smtp_pass,@from_name,@from_email,@reply_to,@is_default,@created_at)`).run({
-    id: aid, user_id: userId, label: a.label,
-    imap_host: a.imapHost, imap_port: a.imapPort ?? 993, imap_secure: a.imapSecure === false ? 0 : 1,
-    imap_user: a.imapUser, imap_pass: encryptSecret(a.imapPass),
-    smtp_host: a.smtpHost || a.imapHost, smtp_port: a.smtpPort ?? 465, smtp_secure: a.smtpSecure === false ? 0 : 1,
-    smtp_user: a.smtpUser || a.imapUser, smtp_pass: encryptSecret(a.smtpPass || a.imapPass),
-    from_name: a.fromName || a.imapUser, from_email: a.fromEmail || a.imapUser, reply_to: a.replyTo || a.imapUser,
-    is_default: rows.length === 0 ? 1 : 0, created_at: Date.now(),
-  })
+  await (await ready()).run(
+    `INSERT INTO accounts
+       (id,user_id,label,imap_host,imap_port,imap_secure,imap_user,imap_pass,smtp_host,smtp_port,smtp_secure,smtp_user,smtp_pass,from_name,from_email,reply_to,is_default,created_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+    [aid, userId, a.label, a.imapHost, a.imapPort ?? 993, a.imapSecure === false ? 0 : 1, a.imapUser, encryptSecret(a.imapPass),
+     a.smtpHost || a.imapHost, a.smtpPort ?? 465, a.smtpSecure === false ? 0 : 1, a.smtpUser || a.imapUser, encryptSecret(a.smtpPass || a.imapPass),
+     a.fromName || a.imapUser, a.fromEmail || a.imapUser, a.replyTo || a.imapUser, rows.length === 0 ? 1 : 0, Date.now()])
   return aid
 }
-export const listAccounts = (userId: string): AccountRow[] =>
-  db().prepare('SELECT * FROM accounts WHERE user_id = ? ORDER BY is_default DESC, created_at ASC').all(userId) as AccountRow[]
+export const listAccounts = async (userId: string): Promise<AccountRow[]> =>
+  (await ready()).all<AccountRow>('SELECT * FROM accounts WHERE user_id = $1 ORDER BY is_default DESC, created_at ASC', [userId])
 
-export function setDefault(userId: string, accountId: string) {
-  const d = db()
-  d.prepare('UPDATE accounts SET is_default = 0 WHERE user_id = ?').run(userId)
-  d.prepare('UPDATE accounts SET is_default = 1 WHERE id = ? AND user_id = ?').run(accountId, userId)
+export async function setDefault(userId: string, accountId: string) {
+  const d = await ready()
+  await d.run('UPDATE accounts SET is_default = 0 WHERE user_id = $1', [userId])
+  await d.run('UPDATE accounts SET is_default = 1 WHERE id = $1 AND user_id = $2', [accountId, userId])
 }
-export function deleteAccount(userId: string, accountId: string) {
-  db().prepare('DELETE FROM accounts WHERE id = ? AND user_id = ?').run(accountId, userId)
+export async function deleteAccount(userId: string, accountId: string) {
+  await (await ready()).run('DELETE FROM accounts WHERE id = $1 AND user_id = $2', [accountId, userId])
 }
 
 // Resolve the MailAccount (decrypted) for a user's chosen/default account.
-export function resolveAccount(userId: string, accountId?: string): MailAccount | null {
-  const rows = listAccounts(userId)
+export async function resolveAccount(userId: string, accountId?: string): Promise<MailAccount | null> {
+  const rows = await listAccounts(userId)
   const r = (accountId ? rows.find((x) => x.id === accountId) : rows.find((x) => x.is_default)) || rows[0]
   if (!r) return null
   return {
@@ -111,22 +145,23 @@ export const usesVault = (): boolean => !!process.env.ZAIM_ENC_KEY || process.en
 export interface ApiKeyRow { id: string; user_id: string; label: string; account_id: string | null; created_at: number; last_used: number | null }
 const hashKey = (raw: string) => crypto.createHash('sha256').update(raw).digest('hex')
 
-export function createApiKey(userId: string, label?: string, accountId?: string): { row: ApiKeyRow; secret: string } {
+export async function createApiKey(userId: string, label?: string, accountId?: string): Promise<{ row: ApiKeyRow; secret: string }> {
   const secret = 'zaim_' + crypto.randomBytes(24).toString('hex')
   const row: ApiKeyRow = { id: id(), user_id: userId, label: label || 'Agent key', account_id: accountId || null, created_at: Date.now(), last_used: null }
-  db().prepare('INSERT INTO api_keys (id,user_id,label,key_hash,account_id,created_at) VALUES (?,?,?,?,?,?)')
-    .run(row.id, row.user_id, row.label, hashKey(secret), row.account_id, row.created_at)
+  await (await ready()).run('INSERT INTO api_keys (id,user_id,label,key_hash,account_id,created_at) VALUES ($1,$2,$3,$4,$5,$6)',
+    [row.id, row.user_id, row.label, hashKey(secret), row.account_id, row.created_at])
   return { row, secret }
 }
-export const listApiKeys = (userId: string): ApiKeyRow[] =>
-  db().prepare('SELECT id,user_id,label,account_id,created_at,last_used FROM api_keys WHERE user_id = ? ORDER BY created_at DESC').all(userId) as ApiKeyRow[]
-export function revokeApiKey(userId: string, keyId: string) {
-  db().prepare('DELETE FROM api_keys WHERE id = ? AND user_id = ?').run(keyId, userId)
+export const listApiKeys = async (userId: string): Promise<ApiKeyRow[]> =>
+  (await ready()).all<ApiKeyRow>('SELECT id,user_id,label,account_id,created_at,last_used FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC', [userId])
+export async function revokeApiKey(userId: string, keyId: string) {
+  await (await ready()).run('DELETE FROM api_keys WHERE id = $1 AND user_id = $2', [keyId, userId])
 }
-// Resolve a raw agent key → the owning user + pinned account (timing-safe via hash lookup).
-export function findByApiKey(raw: string): { userId: string; accountId: string | null } | null {
-  const r = db().prepare('SELECT id,user_id,account_id FROM api_keys WHERE key_hash = ?').get(hashKey(raw)) as { id: string; user_id: string; account_id: string | null } | undefined
+// Resolve a raw agent key → the owning user + pinned account (hash lookup).
+export async function findByApiKey(raw: string): Promise<{ userId: string; accountId: string | null } | null> {
+  const d = await ready()
+  const r = await d.get<{ id: string; user_id: string; account_id: string | null }>('SELECT id,user_id,account_id FROM api_keys WHERE key_hash = $1', [hashKey(raw)])
   if (!r) return null
-  db().prepare('UPDATE api_keys SET last_used = ? WHERE id = ?').run(Date.now(), r.id)
+  await d.run('UPDATE api_keys SET last_used = $1 WHERE id = $2', [Date.now(), r.id])
   return { userId: r.user_id, accountId: r.account_id }
 }

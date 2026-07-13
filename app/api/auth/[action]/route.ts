@@ -14,9 +14,9 @@ export async function GET(req: Request, ctx: { params: Promise<{ action: string 
   if (action !== 'me') return json({ error: 'Not found' }, 404)
   const uid = userIdFromReq(req)
   if (!uid) return json({ user: null })
-  const u = findUserById(uid)
+  const u = await findUserById(uid)
   if (!u) return json({ user: null })
-  const accounts = listAccounts(uid).map((a) => ({ id: a.id, label: a.label, email: a.from_email, isDefault: !!a.is_default }))
+  const accounts = (await listAccounts(uid)).map((a) => ({ id: a.id, label: a.label, email: a.from_email, isDefault: !!a.is_default }))
   return json({ user: { id: u.id, email: u.email }, accounts })
 }
 
@@ -32,12 +32,12 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
 
   if (action === 'register') {
     if (!email || password.length < 8) return json({ error: 'Email and an 8+ character password required' }, 400)
-    if (findUserByEmail(email)) return json({ error: 'An account with that email already exists' }, 409)
-    const u = createUser(email, hashPassword(password))
+    if (await findUserByEmail(email)) return json({ error: 'An account with that email already exists' }, 409)
+    const u = await createUser(email, hashPassword(password))
     return cookie(sessionCookie(makeSession(u.id)), { ok: true, user: { id: u.id, email } })
   }
   if (action === 'login') {
-    const u = findUserByEmail(email)
+    const u = await findUserByEmail(email)
     if (!u || !verifyPassword(password, u.pw_hash)) return json({ error: 'Wrong email or password' }, 401)
     return cookie(sessionCookie(makeSession(u.id)), { ok: true, user: { id: u.id, email } })
   }

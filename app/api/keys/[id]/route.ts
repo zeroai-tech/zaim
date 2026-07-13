@@ -10,6 +10,6 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
   const uid = userIdFromReq(req)
   if (!uid) return json({ error: 'Unauthorized' }, 401)
   const { id } = await params
-  revokeApiKey(uid, id)
+  await revokeApiKey(uid, id)
   return json({ ok: true })
 }

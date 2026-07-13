@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: Request) {
   const uid = userIdFromReq(req)
   if (!uid) return json({ error: 'Unauthorized' }, 401)
-  return json({ keys: listApiKeys(uid) })
+  return json({ keys: await listApiKeys(uid) })
 }
 
 // POST → mint a new agent key. The raw secret is returned ONCE, here only.
@@ -18,6 +18,6 @@ export async function POST(req: Request) {
   if (!uid) return json({ error: 'Unauthorized' }, 401)
   let body: { label?: string; accountId?: string } = {}
   try { body = await req.json() } catch { /* label optional */ }
-  const { row, secret } = createApiKey(uid, body.label, body.accountId)
+  const { row, secret } = await createApiKey(uid, body.label, body.accountId)
   return json({ ok: true, id: row.id, label: row.label, secret })
 }
