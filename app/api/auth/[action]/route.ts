@@ -17,7 +17,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ action: string 
   const u = await findUserById(uid)
   if (!u) return json({ user: null })
   const accounts = (await listAccounts(uid)).map((a) => ({ id: a.id, label: a.label, email: a.from_email, isDefault: !!a.is_default }))
-  return json({ user: { id: u.id, email: u.email }, accounts })
+  return json({ user: { id: u.id, email: u.email, avatar: u.avatar ?? null }, accounts })
 }
 
 // POST /api/auth/register|login|logout
