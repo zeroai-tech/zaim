@@ -23,6 +23,27 @@ function when(d: string) {
 }
 const AV = ['#5b8cff', '#ff7a9c', '#4dd4ac', '#f6bd60', '#b892ff', '#5ec4e6']
 const avatarColor = (s: string) => AV[[...(s || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % AV.length]
+const emailOf = (s: string) => { const m = /<([^>]+)>/.exec(s || ''); return (m ? m[1] : (s || '')).trim().toLowerCase() }
+
+// Avatar: an explicitly-set picture (this user's own upload) wins; otherwise we
+// try the sender's Gravatar (free, per-address, works for anyone who has one);
+// otherwise a coloured initials badge. Falls back gracefully on any miss.
+function Avatar({ src, email, name, cls, txt = 'text-xs' }: { src?: string | null; email?: string; name: string; cls: string; txt?: string }) {
+  const [grav, setGrav] = useState<string | null>(null)
+  const [bad, setBad] = useState(false)
+  useEffect(() => {
+    setBad(false)
+    if (src || !email || typeof crypto === 'undefined' || !crypto.subtle) { setGrav(null); return }
+    let on = true
+    crypto.subtle.digest('SHA-256', new TextEncoder().encode(email.trim().toLowerCase()))
+      .then((buf) => { if (on) setGrav('https://www.gravatar.com/avatar/' + [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('') + '?d=404&s=96') })
+      .catch(() => {})
+    return () => { on = false }
+  }, [src, email])
+  const use = src || grav
+  if (use && !bad) return <img src={use} alt="" onError={() => setBad(true)} className={`${cls} object-cover shrink-0`} />
+  return <span className={`${cls} grid place-items-center ${txt} font-bold text-white shrink-0`} style={{ background: avatarColor(name || email || '?') }}>{initials(name || email || '?')}</span>
+}
 
 export default function Zaim() {
   const [phase, setPhase] = useState<'loading' | 'auth' | 'add-account' | 'app'>('loading')
@@ -40,11 +61,14 @@ export default function Zaim() {
   const [compose, setCompose] = useState<null | ComposeInit>(null)
   const [loadingDraft, setLoadingDraft] = useState(false)
   const [showKeys, setShowKeys] = useState(false)
+  const [avatar, setAvatar] = useState<string>('')
+  const [showProfile, setShowProfile] = useState(false)
 
   const refreshMe = useCallback(async () => {
     const me = await api('/api/auth/me')
     if (!me.user) { setPhase('auth'); return }
     setEmail(me.user.email)
+    setAvatar(me.user.avatar || '')
     const accs: Account[] = me.accounts || []
     setAccounts(accs)
     setActiveAccount((cur) => cur && accs.some((a) => a.id === cur) ? cur : (accs.find((a) => a.isDefault)?.id || accs[0]?.id || ''))
@@ -134,9 +158,19 @@ export default function Zaim() {
           </button>
         ))}
 
-        <div className="mt-auto pt-4 flex gap-3" style={{ borderTop: '1px solid var(--line)' }}>
-          <button onClick={() => setShowKeys(true)} className="text-[11px] text-[color:var(--muted)] hover:text-white">🔑 Agent keys</button>
-          <button onClick={logout} className="text-[11px] text-[color:var(--muted)] hover:text-white ml-auto">Sign out</button>
+        <div className="mt-auto pt-3" style={{ borderTop: '1px solid var(--line)' }}>
+          <button onClick={() => setShowProfile(true)} title="Change your profile picture" className="w-full flex items-center gap-2 rounded-xl px-2 py-2 mb-1 hover:bg-white/5 transition text-left">
+            <Avatar src={avatar} name={email} cls="w-8 h-8 rounded-full text-[11px]" />
+            <span className="min-w-0 flex-1">
+              <span className="block text-xs font-semibold truncate">{email}</span>
+              <span className="block text-[10px] text-[color:var(--muted)]">Edit profile picture</span>
+            </span>
+            <span className="text-[color:var(--muted)] text-xs">✎</span>
+          </button>
+          <div className="flex gap-3 px-1">
+            <button onClick={() => setShowKeys(true)} className="text-[11px] text-[color:var(--muted)] hover:text-white">🔑 Agent keys</button>
+            <button onClick={logout} className="text-[11px] text-[color:var(--muted)] hover:text-white ml-auto">Sign out</button>
+          </div>
         </div>
       </aside>
 
@@ -152,7 +186,7 @@ export default function Zaim() {
             const who = activeFolder === 'sent' || activeFolder === 'drafts' ? m.to : (m.fromName || m.from)
             return (
               <button key={m.uid} onClick={() => open(m.uid)} className={`w-full text-left px-4 py-3 flex gap-3 items-start transition ${selUid === m.uid ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'}`} style={{ borderBottom: '1px solid var(--line)' }}>
-                <span className="shrink-0 w-9 h-9 rounded-full grid place-items-center text-xs font-bold text-white" style={{ background: avatarColor(who) }}>{initials(who)}</span>
+                <Avatar email={emailOf(activeFolder === 'sent' || activeFolder === 'drafts' ? m.to : m.from)} name={who} cls="w-9 h-9 rounded-full text-xs" />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline justify-between gap-2">
                     <span className={`truncate text-sm ${m.seen ? 'font-medium text-[color:var(--muted)]' : 'font-bold'}`}>{activeFolder === 'sent' || activeFolder === 'drafts' ? 'To: ' + who : who}</span>
@@ -175,7 +209,7 @@ export default function Zaim() {
             <header className="px-8 pt-7 pb-5 shrink-0" style={{ borderBottom: '1px solid var(--line)' }}>
               <h2 className="text-xl font-bold leading-snug">{sel.subject}</h2>
               <div className="flex items-center gap-3 mt-4">
-                <span className="w-10 h-10 rounded-full grid place-items-center text-sm font-bold text-white" style={{ background: avatarColor(sel.fromName || sel.from) }}>{initials(sel.fromName || sel.from)}</span>
+                <Avatar email={emailOf(sel.from)} name={sel.fromName || sel.from} cls="w-10 h-10 rounded-full text-sm" txt="text-sm" />
                 <div className="min-w-0"><div className="text-sm font-semibold truncate">{sel.fromName || sel.from}</div><div className="text-xs text-[color:var(--muted)] truncate">{sel.from} · to {sel.to}</div></div>
                 <span className="ml-auto text-xs text-[color:var(--muted)]">{new Date(sel.date).toLocaleString()}</span>
                 {activeFolder === 'drafts'
@@ -203,6 +237,7 @@ export default function Zaim() {
 
       {compose && <Compose initial={compose} from={active?.email} account={activeAccount} onClose={() => setCompose(null)} onSent={() => { setCompose(null); load() }} />}
       {showKeys && <Keys accounts={accounts} onClose={() => setShowKeys(false)} />}
+      {showProfile && <ProfileModal email={email} avatar={avatar} onClose={() => setShowProfile(false)} onSaved={(a) => setAvatar(a)} />}
     </div>
   )
 }
@@ -533,6 +568,66 @@ function Keys({ accounts, onClose }: { accounts: Account[]; onClose: () => void 
                 <button onClick={() => revoke(k.id)} className="text-[11px] text-red-400 hover:text-red-300 shrink-0">Revoke</button>
               </div>
             ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Resize + center-crop an image file to a small square JPEG data URL (keeps the
+// avatar tiny enough to store inline in the users row).
+async function imageToAvatar(file: File, size = 256): Promise<string> {
+  const url = URL.createObjectURL(file)
+  try {
+    const img = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url })
+    const canvas = document.createElement('canvas'); canvas.width = size; canvas.height = size
+    const ctx = canvas.getContext('2d')!
+    const scale = Math.max(size / img.width, size / img.height)
+    const w = img.width * scale, h = img.height * scale
+    ctx.drawImage(img, (size - w) / 2, (size - h) / 2, w, h)
+    return canvas.toDataURL('image/jpeg', 0.85)
+  } finally { URL.revokeObjectURL(url) }
+}
+
+function ProfileModal({ email, avatar, onClose, onSaved }: { email: string; avatar: string; onClose: () => void; onSaved: (a: string) => void }) {
+  const [preview, setPreview] = useState(avatar)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const fileIn = useRef<HTMLInputElement>(null)
+
+  async function pick(file?: File | null) {
+    if (!file) return
+    if (!file.type.startsWith('image/')) { setErr('Please choose an image file.'); return }
+    setErr('')
+    try { setPreview(await imageToAvatar(file)) } catch { setErr('Could not read that image.') }
+  }
+  async function save(next: string | null) {
+    setBusy(true); setErr('')
+    const r = await api('/api/profile', { method: 'POST', body: JSON.stringify({ avatar: next }) })
+    setBusy(false)
+    if (r.ok) { onSaved(next || ''); onClose() } else setErr(r.error || 'Could not save')
+  }
+
+  return (
+    <div className="fixed inset-0 grid place-items-center bg-black/50 backdrop-blur-sm z-50 p-6" onClick={onClose}>
+      <div className="glass rounded-2xl w-full max-w-sm fade-in p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5">
+          <span className="font-bold text-sm">Profile picture</span>
+          <button onClick={onClose} className="text-[color:var(--muted)] hover:text-white">✕</button>
+        </div>
+        <div className="flex flex-col items-center gap-4">
+          <Avatar src={preview} name={email} cls="w-28 h-28 rounded-full text-3xl" txt="text-3xl" />
+          <p className="text-[11px] text-[color:var(--muted)] text-center">Shown next to your name in Zaim. A matching Gravatar also appears in some other mail apps.</p>
+          <input ref={fileIn} type="file" accept="image/*" className="hidden" onChange={(e) => pick(e.target.files?.[0])} />
+          <div className="flex gap-2 w-full">
+            <button onClick={() => fileIn.current?.click()} className="flex-1 accent-grad text-white font-bold rounded-xl py-2.5 text-sm hover:opacity-90">Upload photo</button>
+            {preview && <button onClick={() => setPreview('')} className="px-3 rounded-xl text-sm text-[color:var(--muted)] hover:text-white" style={{ border: '1px solid var(--line)' }}>Clear</button>}
+          </div>
+          {err && <p className="text-[color:var(--danger,#ff6b6b)] text-xs">{err}</p>}
+          <div className="flex gap-2 w-full mt-1">
+            <button onClick={onClose} className="flex-1 rounded-xl py-2.5 text-sm text-[color:var(--muted)] hover:text-white" style={{ border: '1px solid var(--line)' }}>Cancel</button>
+            <button disabled={busy || preview === avatar} onClick={() => save(preview || null)} className="flex-1 accent-grad text-white font-bold rounded-xl py-2.5 text-sm hover:opacity-90 disabled:opacity-50">{busy ? 'Saving…' : 'Save'}</button>
           </div>
         </div>
       </div>

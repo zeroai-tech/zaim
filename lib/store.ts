@@ -42,6 +42,12 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_keys_hash ON api_keys(key_hash)`,
 ]
 
+// Additive, idempotent migrations for databases created before a column existed.
+// (SQLite has no ADD COLUMN IF NOT EXISTS, so we just ignore the "duplicate" error.)
+const MIGRATIONS = [
+  'ALTER TABLE users ADD COLUMN avatar TEXT', // per-user profile picture (data URL)
+]
+
 // Strip sslmode/ssl query params so the connection string can't force cert
 // verification — we drive SSL ourselves below. (Supabase/Neon present a
 // self-signed chain; `sslmode=require` in the URL would otherwise override our
@@ -71,6 +77,7 @@ async function makePg(): Promise<Driver> {
     async all<T>(sql: string, p: Params = []) { return (await pool.query(sql, p as unknown[])).rows as T[] },
   }
   for (const ddl of SCHEMA) await d.run(ddl)
+  for (const m of MIGRATIONS) { try { await d.run(m) } catch { /* already applied */ } }
   return d
 }
 
@@ -85,6 +92,7 @@ async function makeSqlite(): Promise<Driver> {
     async all<T>(sql: string, p: Params = []) { return db.prepare(toQ(sql)).all(...(p as unknown[])) as T[] },
   }
   for (const ddl of SCHEMA) await d.run(ddl)
+  for (const m of MIGRATIONS) { try { await d.run(m) } catch { /* already applied */ } }
   return d
 }
 
@@ -101,7 +109,7 @@ export async function dbPing(): Promise<{ backend: 'postgres' | 'sqlite' }> {
 }
 
 // ── Users ────────────────────────────────────────────────────────────────────
-export interface User { id: string; email: string; pw_hash: string; created_at: number }
+export interface User { id: string; email: string; pw_hash: string; created_at: number; avatar?: string | null }
 export async function createUser(email: string, pwHash: string): Promise<User> {
   const u: User = { id: id(), email: email.toLowerCase(), pw_hash: pwHash, created_at: Date.now() }
   await (await ready()).run('INSERT INTO users (id,email,pw_hash,created_at) VALUES ($1,$2,$3,$4)', [u.id, u.email, u.pw_hash, u.created_at])
@@ -111,6 +119,9 @@ export const findUserByEmail = async (email: string): Promise<User | undefined> 
   (await ready()).get<User>('SELECT * FROM users WHERE email = $1', [email.toLowerCase()])
 export const findUserById = async (uid: string): Promise<User | undefined> =>
   (await ready()).get<User>('SELECT * FROM users WHERE id = $1', [uid])
+export async function setUserAvatar(userId: string, avatar: string | null): Promise<void> {
+  await (await ready()).run('UPDATE users SET avatar = $1 WHERE id = $2', [avatar, userId])
+}
 
 // ── Accounts (mail credentials, encrypted) ───────────────────────────────────
 export interface AccountRow {
