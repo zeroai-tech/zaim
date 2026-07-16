@@ -140,7 +140,7 @@ export default function Zaim() {
           <ContextPanel sel={sel} messages={messages} />
         </Collapsible>
         <Collapsible open={panelState.ai} width={360} side="right">
-          <AIPanel />
+          <AIPanel key={selUid} sel={sel} onDraftReply={(html) => sel && setCompose({ to: sel.from.replace(/.*<|>.*/g, ''), subject: 'Re: ' + sel.subject, html })} />
         </Collapsible>
       </div>
 

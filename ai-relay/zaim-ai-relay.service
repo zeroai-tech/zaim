@@ -1,0 +1,15 @@
+[Unit]
+Description=Zaim AI Relay (Groq proxy)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/zaim-ai-relay
+EnvironmentFile=/home/ubuntu/zaim-ai-relay/.env
+ExecStart=/usr/local/bin/node /home/ubuntu/zaim-ai-relay/server.js
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
