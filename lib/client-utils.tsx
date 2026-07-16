@@ -57,6 +57,8 @@ export function Avatar({ src, email, name, cls, txt = 'text-xs' }: { src?: strin
 
 export function Mark({ big }: { big?: boolean }) { return <span className={`${big ? 'w-9 h-9 text-lg rounded-xl' : 'w-7 h-7 text-sm rounded-lg'} accent-grad grid place-items-center text-white font-black`}>Z</span> }
 
+export const field = 'w-full bg-[color:var(--panel-2)] border rounded-xl px-4 py-3 text-sm outline-none focus:border-[color:var(--accent)]'
+
 // A panel that slides open/shut by animating width instead of unmounting, so it
 // reads as "sliding" per the design brief rather than popping in and out.
 export function Collapsible({ open, width, side = 'left', children }: { open: boolean; width: number; side?: 'left' | 'right'; children: React.ReactNode }) {

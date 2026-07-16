@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   Msg, Full, Att, ComposeInit, Account, Folder, SmartView,
   api, q, isToday,
-  Avatar, Mark, Collapsible,
+  Avatar, Mark, Collapsible, field,
 } from '@/lib/client-utils'
 import { TopBar } from './components/TopBar'
 import { SpacesPanel } from './components/SpacesPanel'
@@ -11,6 +11,7 @@ import { ConversationList } from './components/ConversationList'
 import { ReadingCanvas } from './components/ReadingCanvas'
 import { ContextPanel } from './components/ContextPanel'
 import { AIPanel } from './components/AIPanel'
+import { Landing } from './components/Landing'
 
 export default function Zaim() {
   const [phase, setPhase] = useState<'loading' | 'auth' | 'add-account' | 'app'>('loading')
@@ -150,140 +151,6 @@ export default function Zaim() {
 }
 
 function Splash() { return <div className="h-screen grid place-items-center"><div className="flex items-center gap-3 opacity-70"><Mark /><span className="font-extrabold text-lg">Zaim</span></div></div> }
-const field = 'w-full bg-[color:var(--panel-2)] border rounded-xl px-4 py-3 text-sm outline-none focus:border-[color:var(--accent)]'
-const REL = 'https://github.com/zeroai-tech/zaim/releases/download/desktop-latest'
-
-// ── Marketing landing (signed-out) ───────────────────────────────────────────
-function Landing({ onSignIn, onStart, authMode, closeAuth, onDone }: { onSignIn: () => void; onStart: () => void; authMode: null | 'login' | 'register'; closeAuth: () => void; onDone: () => void }) {
-  return (
-    <div className="min-h-screen overflow-y-auto">
-      <nav className="flex items-center gap-3 px-6 md:px-10 h-16 max-w-6xl mx-auto">
-        <Mark /><span className="font-extrabold tracking-tight text-lg">Zaim</span>
-        <div className="ml-auto flex items-center gap-2">
-          <a href="#download" className="hidden sm:block text-sm text-[color:var(--muted)] hover:text-white px-3 py-2">Download</a>
-          <a href="#agents" className="hidden sm:block text-sm text-[color:var(--muted)] hover:text-white px-3 py-2">For agents</a>
-          <button onClick={onSignIn} className="text-sm font-semibold px-3 py-2 rounded-lg hover:bg-white/5">Sign in</button>
-          <button onClick={onStart} className="accent-grad text-white text-sm font-bold px-4 py-2 rounded-lg hover:opacity-90">Get started</button>
-        </div>
-      </nav>
-
-      {/* Hero */}
-      <header className="max-w-4xl mx-auto text-center px-6 pt-16 md:pt-24 pb-16 fade-in">
-        <div className="inline-flex items-center gap-2 text-xs font-semibold px-3 py-1.5 rounded-full mb-6" style={{ border: '1px solid var(--line)', color: 'var(--muted)' }}>
-          <span className="w-1.5 h-1.5 rounded-full accent-grad" /> Secure mail, built for you and your AI
-        </div>
-        <h1 className="text-4xl md:text-6xl font-extrabold tracking-tight leading-[1.05]" style={{ textWrap: 'balance' } as React.CSSProperties}>
-          Professional email,<br /><span className="text-transparent bg-clip-text accent-grad">answered by your agents.</span>
-        </h1>
-        <p className="text-base md:text-lg text-[color:var(--muted)] mt-6 max-w-2xl mx-auto leading-relaxed">
-          Zaim is a beautiful, private mail client that companies self-host like Outlook — plus an API and CLI so Claude Code, Codex and Gemini can read, draft and send your mail. Your inbox, your rules, your keys.
-        </p>
-        <div className="flex flex-wrap items-center justify-center gap-3 mt-9">
-          <button onClick={onStart} className="accent-grad text-white font-bold px-6 py-3 rounded-xl hover:opacity-90 text-sm">Get started free</button>
-          <a href="#download" className="font-semibold px-6 py-3 rounded-xl text-sm hover:bg-white/5" style={{ border: '1px solid var(--line)' }}>⤓ Download the app</a>
-        </div>
-        <p className="text-xs text-[color:var(--muted)] mt-4">No credit card · Bring your own mailbox · Passwords encrypted at rest</p>
-      </header>
-
-      {/* Why different */}
-      <section className="max-w-6xl mx-auto px-6 grid md:grid-cols-3 gap-5 pb-20">
-        {[
-          ['🔒', 'Total security by design', 'Your IMAP/SMTP passwords are AES-256 encrypted at rest with a key only your deployment holds. Email renders in a locked sandbox. Nothing is shared, nothing is mined.'],
-          ['🤖', 'An inbox your AI can use', 'Generate a scoped agent key and hand it to Claude Code, Codex or Gemini. They triage, draft and send on your behalf — through the same secure engine, never your raw password.'],
-          ['🏢', 'Yours to deploy like Outlook', 'Self-host on Vercel for your whole company, run the CLI on a server, or install the desktop app. One codebase, every surface. You own the data.'],
-        ].map(([icon, title, body]) => (
-          <div key={title} className="glass rounded-2xl p-6">
-            <div className="w-11 h-11 rounded-xl grid place-items-center text-xl mb-4" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }}>{icon}</div>
-            <h3 className="font-bold text-[15px]">{title}</h3>
-            <p className="text-sm text-[color:var(--muted)] mt-2 leading-relaxed">{body}</p>
-          </div>
-        ))}
-      </section>
-
-      {/* Use cases */}
-      <section className="max-w-5xl mx-auto px-6 pb-20">
-        <h2 className="text-2xl md:text-3xl font-extrabold text-center tracking-tight">Built for the way you actually work</h2>
-        <div className="grid md:grid-cols-2 gap-4 mt-10">
-          {[
-            ['Founders & operators', 'Let an agent clear your inbox to zero — summarise threads, draft replies in your voice, flag what needs you. You approve and send.'],
-            ['Support & sales teams', 'Point your agents at a shared mailbox. They respond to routine questions instantly and escalate the rest, all logged and secure.'],
-            ['Developers', '`zaim send`, `zaim list`, `zaim read` from any script or CI job. Wire email into your automations without a bloated SDK.'],
-            ['Whole companies', 'Deploy one Zaim for everyone. Each person connects their own mailbox and manages their own agent keys — no shared secrets.'],
-          ].map(([t, b]) => (
-            <div key={t} className="rounded-2xl p-6" style={{ border: '1px solid var(--line)' }}>
-              <h3 className="font-bold text-[15px] flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full accent-grad" />{t}</h3>
-              <p className="text-sm text-[color:var(--muted)] mt-2 leading-relaxed">{b}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Agents strip */}
-      <section id="agents" className="max-w-5xl mx-auto px-6 pb-20">
-        <div className="glass rounded-2xl p-8 md:p-10 text-center">
-          <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight">Give your AI a real inbox</h2>
-          <p className="text-sm text-[color:var(--muted)] mt-3 max-w-xl mx-auto">Generate a key in Settings, drop it into your agent, and it works through Zaim’s secure engine — never your raw credentials.</p>
-          <pre className="text-left text-xs md:text-sm mt-6 mx-auto max-w-xl overflow-x-auto rounded-xl p-5 leading-relaxed" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }}>{`export ZAIM_API_KEY="zaim_•••"
-zaim list --unread          # triage the inbox
-zaim read 4821              # pull a thread
-zaim send --to ceo@acme.com \\
-  --subject "Re: Q3 numbers" ...`}</pre>
-        </div>
-      </section>
-
-      {/* Download */}
-      <section id="download" className="max-w-5xl mx-auto px-6 pb-24 text-center">
-        <h2 className="text-2xl md:text-3xl font-extrabold tracking-tight">Install Zaim on your machine</h2>
-        <p className="text-sm text-[color:var(--muted)] mt-3">The full secure client, running locally — offline-capable, your data on your device.</p>
-        <div className="flex flex-wrap items-center justify-center gap-3 mt-8">
-          <a href={`${REL}/Zaim-0.1.0-arm64.dmg`} className="font-semibold px-5 py-3 rounded-xl text-sm hover:bg-white/5" style={{ border: '1px solid var(--line)' }}>  macOS (Apple Silicon)</a>
-          <a href={`${REL}/Zaim-0.1.0.dmg`} className="font-semibold px-5 py-3 rounded-xl text-sm hover:bg-white/5" style={{ border: '1px solid var(--line)' }}>  macOS (Intel)</a>
-          <a href={`${REL}/Zaim-0.1.0-win.zip`} className="font-semibold px-5 py-3 rounded-xl text-sm hover:bg-white/5" style={{ border: '1px solid var(--line)' }}>⊞ Windows</a>
-          <a href={`${REL}/Zaim-0.1.0.AppImage`} className="font-semibold px-5 py-3 rounded-xl text-sm hover:bg-white/5" style={{ border: '1px solid var(--line)' }}>🐧 Linux</a>
-        </div>
-        <div className="mt-12">
-          <button onClick={onStart} className="accent-grad text-white font-bold px-7 py-3 rounded-xl hover:opacity-90 text-sm">Start using Zaim in your browser →</button>
-        </div>
-      </section>
-
-      <footer className="max-w-6xl mx-auto px-6 py-8 flex items-center gap-2 text-xs text-[color:var(--muted)]" style={{ borderTop: '1px solid var(--line)' }}>
-        <Mark /><span className="font-semibold">Zaim</span> <span>— a ZeroAI product. Secure mail for humans and their agents.</span>
-        <span className="ml-auto">© {new Date().getFullYear()} ZeroAI Technologies</span>
-      </footer>
-
-      {authMode && <AuthModal mode={authMode} onClose={closeAuth} onDone={onDone} />}
-    </div>
-  )
-}
-
-function AuthModal({ mode: initial, onClose, onDone }: { mode: 'login' | 'register'; onClose: () => void; onDone: () => void }) {
-  const [mode, setMode] = useState<'login' | 'register'>(initial)
-  const [email, setEmail] = useState(''); const [pw, setPw] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false)
-  async function go() {
-    setErr(''); setBusy(true)
-    const r = await api(`/api/auth/${mode}`, { method: 'POST', body: JSON.stringify({ email, password: pw }) })
-    setBusy(false)
-    if (r.ok) onDone(); else setErr(r.error || 'Failed')
-  }
-  return (
-    <div className="fixed inset-0 grid place-items-center bg-black/60 backdrop-blur-sm z-50 p-6" onClick={onClose}>
-      <div className="glass rounded-2xl p-8 w-full max-w-sm fade-in" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2 mb-6"><Mark /><span className="font-extrabold text-lg tracking-tight">Zaim</span><button onClick={onClose} className="ml-auto text-[color:var(--muted)] hover:text-white">✕</button></div>
-        <h1 className="text-xl font-bold">{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
-        <p className="text-sm text-[color:var(--muted)] mt-1 mb-5">Secure mail for you and your agents.</p>
-        <div className="flex flex-col gap-3">
-          <input className={field} style={{ borderColor: 'var(--line)' }} placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input className={field} style={{ borderColor: 'var(--line)' }} type="password" placeholder={mode === 'register' ? 'password (8+ chars)' : 'password'} value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && go()} />
-        </div>
-        {err && <p className="text-xs text-red-400 mt-2">{err}</p>}
-        <button disabled={busy} onClick={go} className="accent-grad text-white font-bold rounded-xl py-3 w-full mt-4 hover:opacity-90 disabled:opacity-50">{busy ? '…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
-        <button onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setErr('') }} className="text-xs text-[color:var(--muted)] hover:text-white mt-4 w-full text-center">
-          {mode === 'login' ? "No account? Create one" : 'Have an account? Sign in'}
-        </button>
-      </div>
-    </div>
-  )
-}
 
 function AddAccount({ onDone, email, canCancel, onCancel }: { onDone: () => void; email: string; canCancel?: boolean; onCancel?: () => void }) {
   const [f, setF] = useState({ label: '', imapHost: '', imapUser: email, imapPass: '', imapPort: '993' })
