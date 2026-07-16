@@ -10,3 +10,6 @@ zaim.db
 zaim.db-*
 
 release/
+
+# graphify
+graphify-out/

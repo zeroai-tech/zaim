@@ -17,11 +17,20 @@ export async function POST(req: Request) {
       to, subject, html: body.html, text: body.text, cc: body.cc, bcc: body.bcc, replyTo: body.replyTo,
       attachments: Array.isArray(body.attachments) ? body.attachments : undefined,
     })
-    // Keep a copy in Sent (best-effort — never fail the send over this).
-    if (body.saveToSent !== false) await appendToSent(r.ctx.account, raw).catch(() => {})
-    // If this send came from a draft, remove that draft so it doesn't linger.
-    if (body.draft?.uid && body.draft?.mailbox) await deleteMessage(r.ctx.account, String(body.draft.mailbox), Number(body.draft.uid)).catch(() => {})
-    return json({ ok: true, messageId })
+    // Keep a copy in Sent (best-effort — never fail the send over this, but never go silent either).
+    let sentWarning: string | undefined
+    if (body.saveToSent !== false) {
+      try { await appendToSent(r.ctx.account, raw) }
+      catch (e) { sentWarning = 'Sent, but could not save a copy to Sent.'; console.error('[mail/send] appendToSent failed:', (e as Error).message) }
+    }
+    // If this send came from a draft, remove that draft so it doesn't linger — same rule: never fail
+    // the send over cleanup, but never swallow the error either, so a lingering draft is diagnosable.
+    let draftWarning: string | undefined
+    if (body.draft?.uid && body.draft?.mailbox) {
+      try { await deleteMessage(r.ctx.account, String(body.draft.mailbox), Number(body.draft.uid)) }
+      catch (e) { draftWarning = 'Sent, but could not remove the original draft.'; console.error('[mail/send] deleteMessage (draft cleanup) failed:', (e as Error).message) }
+    }
+    return json({ ok: true, messageId, ...(sentWarning && { sentWarning }), ...(draftWarning && { draftWarning }) })
   } catch (e) {
     return json({ ok: false, error: (e as Error).message }, 502)
   }
