@@ -84,6 +84,15 @@ export default function Zaim() {
     setLoadingDraft(false)
     setCompose({ to: sel.to, cc: sel.cc, subject: sel.subject, html: sel.html || '', attachments, draft: { uid: sel.uid, mailbox } })
   }
+  // Open a message found via mailbox-wide attachment search — it may live in a
+  // different folder than the one currently active, so switch to it first.
+  async function openFromSearch(mailbox: string, uid: number) {
+    const f = folders.find((x) => x.path === mailbox)
+    if (f) { setSearch(''); setSmartView(null); setActiveFolder(f.key) }
+    setSelUid(uid); setSel(null)
+    const r = await api(`/api/mail/message/${uid}` + q({ mailbox, account: activeAccount }))
+    if (r.ok) setSel(r.message)
+  }
   async function logout() { await api('/api/auth/logout', { method: 'POST' }); setPhase('auth'); setMessages([]); setSel(null); setAccounts([]) }
   function togglePanel(p: 'spaces' | 'context' | 'ai') { setPanelState((s) => ({ ...s, [p]: !s[p] })) }
   function selectFolder(key: string) { setSearch(''); setActiveFolder(key) }
@@ -140,7 +149,7 @@ export default function Zaim() {
           <ContextPanel sel={sel} messages={messages} />
         </Collapsible>
         <Collapsible open={panelState.ai} width={360} side="right">
-          <AIPanel key={selUid} sel={sel} onDraftReply={(html) => sel && setCompose({ to: sel.from.replace(/.*<|>.*/g, ''), subject: 'Re: ' + sel.subject, html })} />
+          <AIPanel key={selUid} sel={sel} onDraftReply={(html) => sel && setCompose({ to: sel.from.replace(/.*<|>.*/g, ''), subject: 'Re: ' + sel.subject, html })} onOpenSearchResult={openFromSearch} />
         </Collapsible>
       </div>
 
