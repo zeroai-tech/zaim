@@ -1,49 +1,16 @@
 'use client'
 import { useEffect, useState, useCallback, useRef } from 'react'
-
-type Msg = { uid: number; subject: string; from: string; fromName: string; to: string; date: string; seen: boolean; flagged: boolean }
-type Full = Msg & { html: string | null; text: string | null; cc?: string; attachments?: { filename: string; contentType: string; size: number }[] }
-type Att = { name: string; size: number; content: string; contentType: string }
-type ComposeInit = { to: string; subject: string; cc?: string; html?: string; attachments?: Att[]; draft?: { uid: number; mailbox: string } }
-type Account = { id: string; label: string; email: string; isDefault: boolean }
-type Folder = { key: string; label: string; icon: string; path: string }
-
-const api = (path: string, init?: RequestInit) =>
-  fetch(path, { ...init, credentials: 'include', headers: { 'content-type': 'application/json', ...(init?.headers || {}) } }).then((r) => r.json())
-const q = (params: Record<string, string | undefined>) =>
-  '?' + Object.entries(params).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v!)}`).join('&')
-
-function initials(name: string) {
-  const p = (name || '?').replace(/[<>"]/g, '').trim().split(/[\s@.]+/).filter(Boolean)
-  return ((p[0]?.[0] || '') + (p[1]?.[0] || '')).toUpperCase() || '?'
-}
-function when(d: string) {
-  const t = new Date(d), now = new Date()
-  return t.toDateString() === now.toDateString() ? t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : t.toLocaleDateString([], { month: 'short', day: 'numeric' })
-}
-const AV = ['#5b8cff', '#ff7a9c', '#4dd4ac', '#f6bd60', '#b892ff', '#5ec4e6']
-const avatarColor = (s: string) => AV[[...(s || '?')].reduce((a, c) => a + c.charCodeAt(0), 0) % AV.length]
-const emailOf = (s: string) => { const m = /<([^>]+)>/.exec(s || ''); return (m ? m[1] : (s || '')).trim().toLowerCase() }
-
-// Avatar: an explicitly-set picture (this user's own upload) wins; otherwise we
-// try the sender's Gravatar (free, per-address, works for anyone who has one);
-// otherwise a coloured initials badge. Falls back gracefully on any miss.
-function Avatar({ src, email, name, cls, txt = 'text-xs' }: { src?: string | null; email?: string; name: string; cls: string; txt?: string }) {
-  const [grav, setGrav] = useState<string | null>(null)
-  const [bad, setBad] = useState(false)
-  useEffect(() => {
-    setBad(false)
-    if (src || !email || typeof crypto === 'undefined' || !crypto.subtle) { setGrav(null); return }
-    let on = true
-    crypto.subtle.digest('SHA-256', new TextEncoder().encode(email.trim().toLowerCase()))
-      .then((buf) => { if (on) setGrav('https://www.gravatar.com/avatar/' + [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('') + '?d=404&s=96') })
-      .catch(() => {})
-    return () => { on = false }
-  }, [src, email])
-  const use = src || grav
-  if (use && !bad) return <img src={use} alt="" onError={() => setBad(true)} className={`${cls} object-cover shrink-0`} />
-  return <span className={`${cls} grid place-items-center ${txt} font-bold text-white shrink-0`} style={{ background: avatarColor(name || email || '?') }}>{initials(name || email || '?')}</span>
-}
+import {
+  Msg, Full, Att, ComposeInit, Account, Folder, SmartView,
+  api, q, isToday,
+  Avatar, Mark, Collapsible,
+} from '@/lib/client-utils'
+import { TopBar } from './components/TopBar'
+import { SpacesPanel } from './components/SpacesPanel'
+import { ConversationList } from './components/ConversationList'
+import { ReadingCanvas } from './components/ReadingCanvas'
+import { ContextPanel } from './components/ContextPanel'
+import { AIPanel } from './components/AIPanel'
 
 export default function Zaim() {
   const [phase, setPhase] = useState<'loading' | 'auth' | 'add-account' | 'app'>('loading')
@@ -53,7 +20,8 @@ export default function Zaim() {
   const [activeAccount, setActiveAccount] = useState('')
   const [folders, setFolders] = useState<Folder[]>([])
   const [activeFolder, setActiveFolder] = useState('INBOX')
-  const [acctMenu, setAcctMenu] = useState(false)
+  const [smartView, setSmartView] = useState<SmartView>(null)
+  const [search, setSearch] = useState('')
   const [messages, setMessages] = useState<Msg[]>([])
   const [sel, setSel] = useState<Full | null>(null)
   const [selUid, setSelUid] = useState<number | null>(null)
@@ -63,6 +31,7 @@ export default function Zaim() {
   const [showKeys, setShowKeys] = useState(false)
   const [avatar, setAvatar] = useState<string>('')
   const [showProfile, setShowProfile] = useState(false)
+  const [panelState, setPanelState] = useState({ spaces: true, context: true, ai: false })
 
   const refreshMe = useCallback(async () => {
     const me = await api('/api/auth/me')
@@ -115,141 +84,72 @@ export default function Zaim() {
     setCompose({ to: sel.to, cc: sel.cc, subject: sel.subject, html: sel.html || '', attachments, draft: { uid: sel.uid, mailbox } })
   }
   async function logout() { await api('/api/auth/logout', { method: 'POST' }); setPhase('auth'); setMessages([]); setSel(null); setAccounts([]) }
+  function togglePanel(p: 'spaces' | 'context' | 'ai') { setPanelState((s) => ({ ...s, [p]: !s[p] })) }
+  function selectFolder(key: string) { setSearch(''); setActiveFolder(key) }
 
   if (phase === 'loading') return <Splash />
   if (phase === 'auth') return <Landing onSignIn={() => setAuthMode('login')} onStart={() => setAuthMode('register')} authMode={authMode} closeAuth={() => setAuthMode(null)} onDone={refreshMe} />
   if (phase === 'add-account') return <AddAccount onDone={refreshMe} email={email} canCancel={accounts.length > 0} onCancel={() => setPhase('app')} />
 
   const active = accounts.find((a) => a.id === activeAccount)
-  const folderTitle = folders.find((f) => f.key === activeFolder)?.label || 'Inbox'
+  const folderTitle = smartView === 'unread' ? 'Unread' : smartView === 'today' ? 'Today' : (folders.find((f) => f.key === activeFolder)?.label || 'Inbox')
+
+  // Smart views filter the loaded folder's messages client-side (no new data —
+  // see SpacesPanel for why Attachments/Waiting/Needs Reply/Scheduled aren't here).
+  let visibleMessages = messages
+  if (smartView === 'unread') visibleMessages = visibleMessages.filter((m) => !m.seen)
+  if (smartView === 'today') visibleMessages = visibleMessages.filter((m) => isToday(m.date))
+  if (search.trim()) {
+    const s = search.trim().toLowerCase()
+    visibleMessages = visibleMessages.filter((m) => m.subject.toLowerCase().includes(s) || m.from.toLowerCase().includes(s) || m.fromName.toLowerCase().includes(s) || m.to.toLowerCase().includes(s))
+  }
 
   return (
-    <div className="h-screen w-screen grid" style={{ gridTemplateColumns: '246px 380px 1fr' }}>
-      <aside className="glass flex flex-col p-4 gap-1 relative" style={{ borderRight: '1px solid var(--line)' }}>
-        <div className="flex items-center gap-2 px-1 mb-4"><Mark /><span className="font-extrabold tracking-tight text-[17px]">Zaim</span></div>
+    <div className="h-screen w-screen flex flex-col">
+      <TopBar
+        accounts={accounts} activeAccount={activeAccount} activeEmail={active?.email || email} activeLabel={active?.label || 'Mailbox'}
+        email={email} avatar={avatar}
+        onSwitchAccount={(id) => { setActiveAccount(id); setActiveFolder('INBOX'); setSmartView(null) }}
+        onAddAccount={() => setPhase('add-account')}
+        search={search} onSearch={setSearch}
+        onCompose={() => setCompose({ to: '', subject: '' })}
+        onShowKeys={() => setShowKeys(true)} onShowProfile={() => setShowProfile(true)} onLogout={logout}
+        panelState={panelState} onTogglePanel={togglePanel}
+      />
+      <div className="flex-1 flex overflow-hidden">
+        <Collapsible open={panelState.spaces} width={220}>
+          <SpacesPanel folders={folders} activeFolder={activeFolder} smartView={smartView} onSelectFolder={selectFolder} onSelectSmartView={setSmartView} />
+        </Collapsible>
 
-        {/* Account switcher */}
-        <button onClick={() => setAcctMenu((v) => !v)} className="flex items-center gap-2 rounded-xl px-2.5 py-2 mb-3 hover:bg-white/5 transition text-left" style={{ border: '1px solid var(--line)' }}>
-          <span className="w-7 h-7 rounded-lg grid place-items-center text-[11px] font-bold text-white shrink-0" style={{ background: avatarColor(active?.email || email) }}>{initials(active?.email || email)}</span>
-          <span className="min-w-0 flex-1">
-            <span className="block text-xs font-semibold truncate">{active?.label || 'Mailbox'}</span>
-            <span className="block text-[10px] text-[color:var(--muted)] truncate">{active?.email || email}</span>
-          </span>
-          <span className="text-[color:var(--muted)] text-xs">{acctMenu ? '▲' : '▼'}</span>
-        </button>
-        {acctMenu && (
-          <div className="absolute z-20 left-4 right-4 top-[104px] glass rounded-xl p-1.5 shadow-xl fade-in" style={{ border: '1px solid var(--line)' }}>
-            {accounts.map((a) => (
-              <button key={a.id} onClick={() => { setActiveAccount(a.id); setActiveFolder('INBOX'); setAcctMenu(false) }} className={`w-full flex items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-white/5 ${a.id === activeAccount ? 'bg-white/5' : ''}`}>
-                <span className="w-6 h-6 rounded-md grid place-items-center text-[10px] font-bold text-white shrink-0" style={{ background: avatarColor(a.email) }}>{initials(a.email)}</span>
-                <span className="min-w-0 flex-1"><span className="block text-xs font-semibold truncate">{a.label}</span><span className="block text-[10px] text-[color:var(--muted)] truncate">{a.email}</span></span>
-                {a.id === activeAccount && <span className="text-[color:var(--accent)] text-xs">✓</span>}
-              </button>
-            ))}
-            <button onClick={() => { setAcctMenu(false); setPhase('add-account') }} className="w-full text-left rounded-lg px-2 py-2 text-xs text-[color:var(--muted)] hover:bg-white/5 hover:text-white">+ Add another mailbox</button>
-          </div>
-        )}
-
-        <button onClick={() => setCompose({ to: '', subject: '' })} className="accent-grad text-white font-bold rounded-xl py-2.5 text-sm mb-3 hover:opacity-90 transition">✏️  Compose</button>
-
-        {folders.map((f) => (
-          <button key={f.key} onClick={() => setActiveFolder(f.key)} className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer text-left ${activeFolder === f.key ? 'bg-white/5 text-white font-semibold' : 'text-[color:var(--muted)] hover:bg-white/5'}`}>
-            <span>{f.icon}</span>{f.label}
-          </button>
-        ))}
-
-        <div className="mt-auto pt-3" style={{ borderTop: '1px solid var(--line)' }}>
-          <button onClick={() => setShowProfile(true)} title="Change your profile picture" className="w-full flex items-center gap-2 rounded-xl px-2 py-2 mb-1 hover:bg-white/5 transition text-left">
-            <Avatar src={avatar} name={email} cls="w-8 h-8 rounded-full text-[11px]" />
-            <span className="min-w-0 flex-1">
-              <span className="block text-xs font-semibold truncate">{email}</span>
-              <span className="block text-[10px] text-[color:var(--muted)]">Edit profile picture</span>
-            </span>
-            <span className="text-[color:var(--muted)] text-xs">✎</span>
-          </button>
-          <div className="flex gap-3 px-1">
-            <button onClick={() => setShowKeys(true)} className="text-[11px] text-[color:var(--muted)] hover:text-white">🔑 Agent keys</button>
-            <button onClick={logout} className="text-[11px] text-[color:var(--muted)] hover:text-white ml-auto">Sign out</button>
-          </div>
+        <div className="w-[360px] shrink-0 h-full" style={{ borderRight: '1px solid var(--line)' }}>
+          <ConversationList messages={visibleMessages} activeFolder={activeFolder} selUid={selUid} listLoading={listLoading} folderTitle={folderTitle} onOpen={open} onRefresh={load} />
         </div>
-      </aside>
 
-      <section className="flex flex-col overflow-hidden" style={{ borderRight: '1px solid var(--line)' }}>
-        <header className="flex items-center justify-between px-5 h-14 shrink-0" style={{ borderBottom: '1px solid var(--line)' }}>
-          <h1 className="font-bold">{folderTitle}</h1>
-          <button onClick={load} className="text-xs text-[color:var(--muted)] hover:text-white">↻ Refresh</button>
-        </header>
-        <div className="overflow-y-auto">
-          {listLoading && <div className="p-6 text-sm text-[color:var(--muted)]">Loading…</div>}
-          {!listLoading && messages.length === 0 && <div className="p-6 text-sm text-[color:var(--muted)]">Nothing in {folderTitle.toLowerCase()}.</div>}
-          {!listLoading && messages.map((m) => {
-            const who = activeFolder === 'sent' || activeFolder === 'drafts' ? m.to : (m.fromName || m.from)
-            return (
-              <button key={m.uid} onClick={() => open(m.uid)} className={`w-full text-left px-4 py-3 flex gap-3 items-start transition ${selUid === m.uid ? 'bg-white/[0.06]' : 'hover:bg-white/[0.03]'}`} style={{ borderBottom: '1px solid var(--line)' }}>
-                <Avatar email={emailOf(activeFolder === 'sent' || activeFolder === 'drafts' ? m.to : m.from)} name={who} cls="w-9 h-9 rounded-full text-xs" />
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-baseline justify-between gap-2">
-                    <span className={`truncate text-sm ${m.seen ? 'font-medium text-[color:var(--muted)]' : 'font-bold'}`}>{activeFolder === 'sent' || activeFolder === 'drafts' ? 'To: ' + who : who}</span>
-                    <span className="text-[11px] text-[color:var(--muted)] shrink-0">{when(m.date)}</span>
-                  </span>
-                  <span className={`block truncate text-[13px] mt-0.5 ${m.seen ? 'text-[color:var(--muted)]' : 'text-white'}`}>{m.flagged && '⭐ '}{m.subject}</span>
-                </span>
-                {!m.seen && <span className="mt-2 w-2 h-2 rounded-full accent-grad shrink-0" />}
-              </button>
-            )
-          })}
+        <div className="flex-1 min-w-0 h-full" style={{ borderRight: '1px solid var(--line)' }}>
+          <ReadingCanvas
+            sel={sel} selUid={selUid} activeFolder={activeFolder} folders={folders} activeAccount={activeAccount}
+            loadingDraft={loadingDraft} onEditDraft={editDraft}
+            onReply={() => sel && setCompose({ to: sel.from.replace(/.*<|>.*/g, ''), subject: 'Re: ' + sel.subject })}
+            compose={compose} from={active?.email} account={activeAccount}
+            onComposeClose={() => setCompose(null)} onComposeSent={() => { setCompose(null); load() }}
+          />
         </div>
-      </section>
 
-      <main className="overflow-hidden flex flex-col">
-        {!sel && selUid == null && <Empty />}
-        {!sel && selUid != null && <div className="p-8 text-sm text-[color:var(--muted)]">Opening…</div>}
-        {sel && (
-          <div className="flex flex-col h-full fade-in">
-            <header className="px-8 pt-7 pb-5 shrink-0" style={{ borderBottom: '1px solid var(--line)' }}>
-              <h2 className="text-xl font-bold leading-snug">{sel.subject}</h2>
-              <div className="flex items-center gap-3 mt-4">
-                <Avatar email={emailOf(sel.from)} name={sel.fromName || sel.from} cls="w-10 h-10 rounded-full text-sm" txt="text-sm" />
-                <div className="min-w-0"><div className="text-sm font-semibold truncate">{sel.fromName || sel.from}</div><div className="text-xs text-[color:var(--muted)] truncate">{sel.from} · to {sel.to}</div></div>
-                <span className="ml-auto text-xs text-[color:var(--muted)]">{new Date(sel.date).toLocaleString()}</span>
-                {activeFolder === 'drafts'
-                  ? <button onClick={editDraft} disabled={loadingDraft} className="text-xs font-semibold px-3 py-1.5 rounded-lg accent-grad text-white hover:opacity-90 disabled:opacity-50">{loadingDraft ? 'Loading…' : '✏️ Edit & Send'}</button>
-                  : <button onClick={() => setCompose({ to: sel.from.replace(/.*<|>.*/g, ''), subject: 'Re: ' + sel.subject })} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10">↩ Reply</button>}
-              </div>
-            </header>
-            {sel.attachments && sel.attachments.length > 0 && (
-              <div className="flex flex-wrap gap-2 px-8 py-3 shrink-0" style={{ borderBottom: '1px solid var(--line)' }}>
-                {sel.attachments.map((a, i) => (
-                  <a key={i} download href={'/api/mail/attachment' + q({ uid: String(sel.uid), mailbox: folders.find((f) => f.key === activeFolder)?.path || 'INBOX', index: String(i), account: activeAccount })}
-                    className="flex items-center gap-2 rounded-lg pl-2.5 pr-3 py-1.5 text-xs hover:bg-white/5 transition" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }}>
-                    <span className="text-sm">📎</span>
-                    <span className="max-w-[220px] truncate font-medium">{a.filename}</span>
-                    <span className="text-[color:var(--muted)]">{fmtSize(a.size)}</span>
-                    <span className="text-[color:var(--accent)]">↓</span>
-                  </a>
-                ))}
-              </div>
-            )}
-            <iframe title="message" sandbox="" className="flex-1 w-full bg-white" srcDoc={sel.html || `<pre style="font-family:system-ui;white-space:pre-wrap;padding:24px;color:#111">${(sel.text || '').replace(/</g, '&lt;')}</pre>`} />
-          </div>
-        )}
-      </main>
+        <Collapsible open={panelState.context} width={320}>
+          <ContextPanel sel={sel} messages={messages} />
+        </Collapsible>
+        <Collapsible open={panelState.ai} width={360} side="right">
+          <AIPanel />
+        </Collapsible>
+      </div>
 
-      {compose && <Compose initial={compose} from={active?.email} account={activeAccount} onClose={() => setCompose(null)} onSent={() => { setCompose(null); load() }} />}
       {showKeys && <Keys accounts={accounts} onClose={() => setShowKeys(false)} />}
       {showProfile && <ProfileModal email={email} avatar={avatar} onClose={() => setShowProfile(false)} onSaved={(a) => setAvatar(a)} />}
     </div>
   )
 }
 
-function Mark({ big }: { big?: boolean }) { return <span className={`${big ? 'w-9 h-9 text-lg rounded-xl' : 'w-7 h-7 text-sm rounded-lg'} accent-grad grid place-items-center text-white font-black`}>Z</span> }
 function Splash() { return <div className="h-screen grid place-items-center"><div className="flex items-center gap-3 opacity-70"><Mark /><span className="font-extrabold text-lg">Zaim</span></div></div> }
-function Empty() {
-  return <div className="h-full grid place-items-center text-center px-8"><div className="opacity-70">
-    <div className="mx-auto mb-4 w-14 h-14 rounded-2xl accent-grad grid place-items-center text-white text-2xl font-black">Z</div>
-    <div className="font-bold text-lg">Select a message</div><div className="text-sm text-[color:var(--muted)] mt-1">Secure mail, ready for you and your agents.</div>
-  </div></div>
-}
 const field = 'w-full bg-[color:var(--panel-2)] border rounded-xl px-4 py-3 text-sm outline-none focus:border-[color:var(--accent)]'
 const REL = 'https://github.com/zeroai-tech/zaim/releases/download/desktop-latest'
 
@@ -418,100 +318,6 @@ function AddAccount({ onDone, email, canCancel, onCancel }: { onDone: () => void
   )
 }
 
-const fmtSize = (n: number) => (n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(0) + ' KB' : (n / 1048576).toFixed(1) + ' MB')
-const readB64 = (f: File) => new Promise<string>((res) => { const r = new FileReader(); r.onload = () => res((r.result as string).split(',')[1] || ''); r.readAsDataURL(f) })
-
-function Compose({ initial, from, account, onClose, onSent }: { initial: ComposeInit; from?: string; account: string; onClose: () => void; onSent: () => void }) {
-  const [to, setTo] = useState(initial.to); const [cc, setCc] = useState(initial.cc || ''); const [bcc, setBcc] = useState('')
-  const [subject, setSubject] = useState(initial.subject)
-  const [showCc, setShowCc] = useState(!!initial.cc); const [showBcc, setShowBcc] = useState(false)
-  const [atts, setAtts] = useState<Att[]>(initial.attachments || [])
-  const [sending, setSending] = useState(false); const [error, setError] = useState('')
-  const ed = useRef<HTMLDivElement>(null); const fileIn = useRef<HTMLInputElement>(null)
-
-  useEffect(() => { if (ed.current && initial.html) ed.current.innerHTML = initial.html }, [initial.html])
-  const exec = (cmd: string, val?: string) => { document.execCommand(cmd, false, val); ed.current?.focus() }
-  async function addFiles(files: FileList | null) {
-    if (!files) return
-    const next: Att[] = []
-    for (const f of Array.from(files)) next.push({ name: f.name, size: f.size, content: await readB64(f), contentType: f.type || 'application/octet-stream' })
-    setAtts((a) => [...a, ...next])
-  }
-  async function send() {
-    setError(''); setSending(true)
-    const html = ed.current?.innerHTML || ''
-    const r = await api('/api/mail/send' + q({ account }), { method: 'POST', body: JSON.stringify({
-      to, cc: cc || undefined, bcc: bcc || undefined, subject, html,
-      attachments: atts.map((a) => ({ filename: a.name, content: a.content, contentType: a.contentType })),
-      saveToSent: true, draft: initial.draft,
-    }) })
-    setSending(false)
-    if (r.ok) onSent(); else setError(r.error || 'Send failed')
-  }
-  const line = 'bg-transparent border-b pb-2 text-sm outline-none focus:border-[color:var(--accent)] w-full'
-  const tbtn = 'w-8 h-8 rounded-lg grid place-items-center text-[color:var(--muted)] hover:text-white hover:bg-white/5 text-sm'
-
-  return (
-    <div className="fixed inset-0 grid place-items-center bg-black/50 backdrop-blur-sm z-50 p-6" onClick={onClose}>
-      <div className="glass rounded-2xl w-full max-w-2xl fade-in flex flex-col max-h-[88vh]" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 h-12 shrink-0" style={{ borderBottom: '1px solid var(--line)' }}>
-          <span className="font-bold text-sm">New message{from ? ` · from ${from}` : ''}</span>
-          <button onClick={onClose} className="text-[color:var(--muted)] hover:text-white">✕</button>
-        </div>
-        <div className="p-5 flex flex-col gap-3 overflow-y-auto">
-          <div className="flex items-center gap-2" style={{ borderBottom: '1px solid var(--line)' }}>
-            <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="To" className={line} style={{ border: 'none' }} />
-            <div className="flex gap-2 text-[11px] shrink-0">
-              {!showCc && <button onClick={() => setShowCc(true)} className="text-[color:var(--muted)] hover:text-white">Cc</button>}
-              {!showBcc && <button onClick={() => setShowBcc(true)} className="text-[color:var(--muted)] hover:text-white">Bcc</button>}
-            </div>
-          </div>
-          {showCc && <input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="Cc" className={line} style={{ borderColor: 'var(--line)' }} autoFocus />}
-          {showBcc && <input value={bcc} onChange={(e) => setBcc(e.target.value)} placeholder="Bcc" className={line} style={{ borderColor: 'var(--line)' }} autoFocus />}
-          <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className={line} style={{ borderColor: 'var(--line)' }} />
-
-          {/* formatting toolbar */}
-          <div className="flex items-center gap-0.5 -mb-1">
-            <button onClick={() => exec('bold')} className={tbtn + ' font-bold'} title="Bold">B</button>
-            <button onClick={() => exec('italic')} className={tbtn + ' italic'} title="Italic">I</button>
-            <button onClick={() => exec('underline')} className={tbtn + ' underline'} title="Underline">U</button>
-            <span className="w-px h-4 mx-1" style={{ background: 'var(--line)' }} />
-            <button onClick={() => exec('insertUnorderedList')} className={tbtn} title="Bulleted list">•</button>
-            <button onClick={() => exec('insertOrderedList')} className={tbtn} title="Numbered list">1.</button>
-            <button onClick={() => { const u = prompt('Link URL:'); if (u) exec('createLink', u) }} className={tbtn} title="Insert link">🔗</button>
-            <span className="w-px h-4 mx-1" style={{ background: 'var(--line)' }} />
-            <button onClick={() => fileIn.current?.click()} className={tbtn} title="Attach files">📎</button>
-          </div>
-
-          <div ref={ed} contentEditable suppressContentEditableWarning data-ph="Write your message…"
-            className="zaim-editor min-h-[180px] max-h-[38vh] overflow-y-auto text-sm outline-none leading-relaxed rounded-xl px-3 py-3"
-            style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }} />
-
-          {/* attachments */}
-          <input ref={fileIn} type="file" multiple className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = '' }} />
-          {atts.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {atts.map((a, i) => (
-                <div key={i} className="flex items-center gap-2 rounded-lg pl-2.5 pr-2 py-1.5 text-xs" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }}>
-                  <span>📎</span><span className="max-w-[180px] truncate font-medium">{a.name}</span>
-                  <span className="text-[color:var(--muted)]">{fmtSize(a.size)}</span>
-                  <button onClick={() => setAtts((x) => x.filter((_, j) => j !== i))} className="text-[color:var(--muted)] hover:text-red-400 ml-0.5">✕</button>
-                </div>
-              ))}
-            </div>
-          )}
-          {error && <p className="text-xs text-red-400">{error}</p>}
-        </div>
-        <div className="flex items-center gap-3 px-5 py-4 shrink-0" style={{ borderTop: '1px solid var(--line)' }}>
-          <button disabled={sending || !to} onClick={send} className="accent-grad text-white font-bold rounded-xl px-6 py-2.5 text-sm disabled:opacity-50">{sending ? 'Sending…' : 'Send'}</button>
-          <button onClick={() => fileIn.current?.click()} className="text-xs text-[color:var(--muted)] hover:text-white">📎 Attach</button>
-          <span className="text-xs text-[color:var(--muted)] ml-auto">Encrypted transport{atts.length ? ` · ${atts.length} file${atts.length > 1 ? 's' : ''}` : ''}</span>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 type KeyRow = { id: string; label: string; account_id: string | null; created_at: number; last_used: number | null }
 function Keys({ accounts, onClose }: { accounts: Account[]; onClose: () => void }) {
   const [keys, setKeys] = useState<KeyRow[]>([])
@@ -563,7 +369,7 @@ function Keys({ accounts, onClose }: { accounts: Account[]; onClose: () => void 
                 <span className="w-7 h-7 rounded-lg grid place-items-center text-xs" style={{ background: 'var(--line)' }}>🔑</span>
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-semibold truncate">{k.label}</div>
-                  <div className="text-[10px] text-[color:var(--muted)]">{k.last_used ? `last used ${when(new Date(k.last_used).toISOString())}` : 'never used'}{k.account_id ? '' : ' · default mailbox'}</div>
+                  <div className="text-[10px] text-[color:var(--muted)]">{k.last_used ? `last used ${new Date(k.last_used).toLocaleString()}` : 'never used'}{k.account_id ? '' : ' · default mailbox'}</div>
                 </div>
                 <button onClick={() => revoke(k.id)} className="text-[11px] text-red-400 hover:text-red-300 shrink-0">Revoke</button>
               </div>
