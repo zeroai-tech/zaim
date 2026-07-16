@@ -38,3 +38,13 @@ body {
 .zaim-editor ul { list-style: disc; padding-left: 1.4em; }
 .zaim-editor ol { list-style: decimal; padding-left: 1.4em; }
 @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes blink { 50% { opacity: 0; } }
+@keyframes travel {
+  0% { left: var(--x0); top: var(--y0); opacity: 0; }
+  15% { opacity: 1; }
+  85% { opacity: 1; }
+  100% { left: var(--x1); top: var(--y1); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .anim-safe { animation: none !important; }
+}
