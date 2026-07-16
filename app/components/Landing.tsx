@@ -4,6 +4,23 @@ import { api, field, Mark } from '@/lib/client-utils'
 
 const REL = 'https://github.com/zeroai-tech/zaim/releases/download/desktop-latest'
 
+// A small hand-drawn icon set (no icon-library dependency, matching the rest
+// of this codebase's lean, zero-extra-package approach).
+type IconName = 'search' | 'message' | 'user' | 'bot' | 'paperclip' | 'folder' | 'lock' | 'building'
+const ICON_PATHS: Record<IconName, React.ReactNode> = {
+  search: <><circle cx="11" cy="11" r="7" /><path d="M21 21l-4.3-4.3" /></>,
+  message: <path d="M21 11.5a8.38 8.38 0 0 1-9.4 8.4 8.5 8.5 0 0 1-3.8-.9L3 21l1.9-5.8a8.38 8.38 0 0 1-.9-3.8A8.5 8.5 0 0 1 12.4 3a8.48 8.48 0 0 1 8.6 8.5z" />,
+  user: <><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></>,
+  bot: <><path d="M12 8V4H8" /><rect x="4" y="8" width="16" height="12" rx="2" /><path d="M2 14h2" /><path d="M20 14h2" /><path d="M9 13v2" /><path d="M15 13v2" /></>,
+  paperclip: <path d="M21.4 11.1 12.2 20.3a6 6 0 0 1-8.5-8.5L13 2.6a4 4 0 0 1 5.7 5.7L9.5 17.5a2 2 0 0 1-2.8-2.8L15 6.4" />,
+  folder: <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9L9.6 3.9A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z" />,
+  lock: <><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></>,
+  building: <><path d="M6 22V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v18" /><path d="M14 10h4a1 1 0 0 1 1 1v11" /><path d="M2 22h20" /><path d="M9 7h1" /><path d="M9 11h1" /><path d="M9 15h1" /></>,
+}
+function Icon({ name, className = 'w-4 h-4', style }: { name: IconName; className?: string; style?: React.CSSProperties }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>{ICON_PATHS[name]}</svg>
+}
+
 // Deterministic PRNG so decorative layout (scatter positions, delays) is stable
 // across server and client render — Math.random() here would cause a hydration
 // mismatch since the server has no way to match the client's random sequence.
@@ -138,13 +155,13 @@ function Floor1() {
 }
 
 // ── Floor 2: the real panels assemble — no invented features, just Zaim's own ─
-const CHIPS = [
-  { icon: '🔍', label: 'Search', note: 'Filter this folder as you type.' },
-  { icon: '💬', label: 'Conversation', note: 'A clean threaded view, not raw HTML.' },
-  { icon: '🧑', label: 'Context', note: "Who they are — no invented data." },
-  { icon: '🤖', label: 'Agents', note: 'A scoped key for Claude Code, Codex or Gemini.' },
-  { icon: '📎', label: 'Files', note: 'Attach, preview, and download — inline.' },
-  { icon: '🗂️', label: 'Spaces', note: 'Real folders, plus Unread & Today.' },
+const CHIPS: { icon: IconName; label: string; note: string }[] = [
+  { icon: 'search', label: 'Search', note: 'Filter this folder as you type.' },
+  { icon: 'message', label: 'Conversation', note: 'A clean threaded view, not raw HTML.' },
+  { icon: 'user', label: 'Context', note: "Who they are — no invented data." },
+  { icon: 'bot', label: 'Agents', note: 'A scoped key for Claude Code, Codex or Gemini.' },
+  { icon: 'paperclip', label: 'Files', note: 'Attach, preview, and download — inline.' },
+  { icon: 'folder', label: 'Spaces', note: 'Real folders, plus Unread & Today.' },
 ]
 function Floor2() {
   const { ref, shown } = useReveal<HTMLDivElement>()
@@ -167,7 +184,7 @@ function Floor2() {
                 opacity: shown ? 1 : 0, transitionDuration: '900ms', transitionDelay: `${scatter[i].delay}s`,
               }}
             >
-              <span className="text-base">{c.icon}</span><span className="text-sm font-bold">{c.label}</span>
+              <Icon name={c.icon} className="w-4 h-4" style={{ color: 'var(--accent-2)' }} /><span className="text-sm font-bold">{c.label}</span>
             </div>
           ))}
         </div>
@@ -176,7 +193,7 @@ function Floor2() {
         <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-4 mt-6 fade-in">
           {CHIPS.map((c) => (
             <div key={c.label} className="rounded-xl p-4" style={{ border: '1px solid var(--line)' }}>
-              <div className="text-xs font-bold flex items-center gap-1.5">{c.icon} {c.label}</div>
+              <div className="text-xs font-bold flex items-center gap-1.5"><Icon name={c.icon} className="w-3.5 h-3.5" style={{ color: 'var(--accent-2)' }} /> {c.label}</div>
               <p className="text-xs mt-1.5 leading-relaxed" style={{ color: 'var(--muted)' }}>{c.note}</p>
             </div>
           ))}
@@ -228,13 +245,13 @@ export function Landing({ onSignIn, onStart, authMode, closeAuth, onDone }: { on
 
       {/* Why different */}
       <section className="max-w-6xl mx-auto px-6 grid md:grid-cols-3 gap-5 pb-20">
-        {[
-          ['🔒', 'Total security by design', 'Your IMAP/SMTP passwords are AES-256 encrypted at rest with a key only your deployment holds. Email renders in a locked sandbox. Nothing is shared, nothing is mined.'],
-          ['🤖', 'An inbox your AI can use', 'Generate a scoped agent key and hand it to Claude Code, Codex or Gemini. They triage, draft and send on your behalf — through the same secure engine, never your raw password.'],
-          ['🏢', 'Yours to deploy like Outlook', 'Self-host on Vercel for your whole company, run the CLI on a server, or install the desktop app. One codebase, every surface. You own the data.'],
-        ].map(([icon, title, body]) => (
+        {([
+          ['lock', 'Total security by design', 'Your IMAP/SMTP passwords are AES-256 encrypted at rest with a key only your deployment holds. Email renders in a locked sandbox. Nothing is shared, nothing is mined.'],
+          ['bot', 'An inbox your AI can use', 'Generate a scoped agent key and hand it to Claude Code, Codex or Gemini. They triage, draft and send on your behalf — through the same secure engine, never your raw password.'],
+          ['building', 'Yours to deploy like Outlook', 'Self-host on Vercel for your whole company, run the CLI on a server, or install the desktop app. One codebase, every surface. You own the data.'],
+        ] as [IconName, string, string][]).map(([icon, title, body]) => (
           <div key={title} className="glass rounded-2xl p-6">
-            <div className="w-11 h-11 rounded-xl grid place-items-center text-xl mb-4" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }}>{icon}</div>
+            <div className="w-11 h-11 rounded-xl grid place-items-center mb-4" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }}><Icon name={icon} className="w-5 h-5" style={{ color: 'var(--accent-2)' }} /></div>
             <h3 className="font-bold text-[15px]">{title}</h3>
             <p className="text-sm text-[color:var(--muted)] mt-2 leading-relaxed">{body}</p>
           </div>
