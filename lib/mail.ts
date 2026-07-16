@@ -200,6 +200,68 @@ export async function deleteMessage(account: MailAccount, mailbox: string, uid: 
   })
 }
 
+// Walk imapflow's MIME bodyStructure tree down to its leaf parts.
+function flattenParts(node: any, out: any[] = []): any[] {
+  if (!node) return out
+  if (Array.isArray(node.childNodes) && node.childNodes.length) {
+    for (const child of node.childNodes) flattenParts(child, out)
+  } else {
+    out.push(node)
+  }
+  return out
+}
+// A leaf part counts as an attachment if it carries a filename — covers both
+// Content-Disposition: attachment and named inline parts (e.g. embedded images
+// some clients mark inline). Plain text/html body parts have no filename.
+function attachmentFilename(part: any): string | null {
+  return part?.dispositionParameters?.filename || part?.parameters?.name || null
+}
+
+export interface AttachmentHit { mailbox: string; uid: number; subject: string; from: string; fromName: string; date: string; attachments: MailAttachmentMeta[] }
+
+// Scans every folder for messages carrying attachments, optionally filtered by
+// a case-insensitive filename match. Uses bodyStructure only (no attachment
+// bytes fetched), and is bounded per-folder + total hits so a large mailbox
+// can't hang a serverless request.
+export async function searchAttachments(account: MailAccount, query: string, opts?: { perFolder?: number; limit?: number }): Promise<AttachmentHit[]> {
+  const perFolder = opts?.perFolder ?? 150
+  const limit = opts?.limit ?? 25
+  const q = query.trim().toLowerCase()
+  return withImap(account, async (c) => {
+    const boxes = await c.list()
+    const paths = [...new Set(boxes.map((b) => b.path))]
+    const hits: AttachmentHit[] = []
+    for (const path of paths) {
+      if (hits.length >= limit) break
+      let lock
+      try { lock = await c.getMailboxLock(path) } catch { continue }
+      try {
+        const total = (c.mailbox && typeof c.mailbox === 'object' ? c.mailbox.exists : 0) || 0
+        if (!total) continue
+        const start = Math.max(1, total - perFolder + 1)
+        for await (const m of c.fetch(`${start}:*`, { uid: true, envelope: true, bodyStructure: true })) {
+          if (hits.length >= limit) break
+          const atts = flattenParts(m.bodyStructure)
+            .map((p) => ({ part: p, filename: attachmentFilename(p) }))
+            .filter((p): p is { part: any; filename: string } => !!p.filename)
+          if (!atts.length) continue
+          const matched = q ? atts.filter((a) => a.filename.toLowerCase().includes(q)) : atts
+          if (q && !matched.length) continue
+          const env = m.envelope
+          hits.push({
+            mailbox: path, uid: m.uid,
+            subject: env?.subject || '(no subject)',
+            from: env?.from?.[0]?.address || '', fromName: env?.from?.[0]?.name || env?.from?.[0]?.address || '',
+            date: (env?.date || new Date()).toString(),
+            attachments: matched.map((a) => ({ filename: a.filename, contentType: a.part.type ? `${a.part.type}/${a.part.subtype || 'octet-stream'}` : 'application/octet-stream', size: a.part.size || 0 })),
+          })
+        }
+      } finally { if (lock) lock.release() }
+    }
+    return hits.sort((a, b) => +new Date(b.date) - +new Date(a.date))
+  })
+}
+
 export async function verify(account: MailAccount): Promise<{ imap: boolean; smtp: boolean; error?: string }> {
   const res = { imap: false, smtp: false as boolean, error: undefined as string | undefined }
   try { await withImap(account, async () => {}); res.imap = true } catch (e) { res.error = 'IMAP: ' + (e as Error).message }
