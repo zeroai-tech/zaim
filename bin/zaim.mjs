@@ -9,6 +9,7 @@
 //    zaim list [--limit 40] [--mailbox INBOX] [--json]
 //    zaim read <uid> [--json]
 //    zaim send --to a@b.com --subject "Hi" --body "text" [--cc] [--bcc] [--html "<p>..</p>"]
+//    zaim draft --to a@b.com --subject "Hi" --body "text" [--cc] [--bcc] [--html "<p>..</p>"]
 //    zaim encrypt "<password>"     # local: needs ZAIM_ENC_KEY, prints enc:... for .env
 // ─────────────────────────────────────────────────────────────────────────────
 import crypto from 'node:crypto'
@@ -62,6 +63,12 @@ switch (cmd) {
     console.log(asJson ? JSON.stringify(r) : `✓ sent — ${r.messageId}`)
     break
   }
+  case 'draft': {
+    if (!f.to || !f.subject) die('usage: zaim draft --to <addr> --subject <s> --body <text> [--html <h>]')
+    const r = await call('/api/mail/draft', { method: 'POST', body: JSON.stringify({ to: f.to, subject: f.subject, text: f.body, html: f.html, cc: f.cc, bcc: f.bcc }) })
+    console.log(asJson ? JSON.stringify(r) : `✓ saved to Drafts — never sent`)
+    break
+  }
   case 'encrypt': {
     const plain = pos[0]; const k = process.env.ZAIM_ENC_KEY
     if (!plain) die('usage: zaim encrypt "<password>"')
@@ -79,6 +86,7 @@ switch (cmd) {
   zaim list [--limit N] [--mailbox INBOX] [--json]
   zaim read <uid> [--json]
   zaim send --to <addr> --subject <s> --body <text> [--html <h>] [--cc] [--bcc]
+  zaim draft --to <addr> --subject <s> --body <text> [--html <h>] [--cc] [--bcc]
   zaim encrypt "<password>"
 
 env: ZAIM_URL (default http://localhost:3000), ZAIM_API_KEY`)

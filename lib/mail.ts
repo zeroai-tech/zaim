@@ -192,6 +192,20 @@ export async function appendToSent(account: MailAccount, raw: Buffer): Promise<v
   })
 }
 
+// Compose a message and save it to the account's Drafts folder — never sent
+// via SMTP, purely an IMAP APPEND, so it's safe to prepare outreach drafts
+// for review without any risk of them going out unreviewed.
+export async function saveDraft(account: MailAccount, input: SendInput): Promise<void> {
+  const raw = await buildRaw(account, input)
+  return withImap(account, async (c) => {
+    const boxes = await c.list()
+    const drafts = boxes.find((b) => b.specialUse === '\\Drafts')?.path
+      || boxes.find((b) => /(^|[./])draft/i.test(b.path) || /(^|[./])draft/i.test(b.name))?.path
+    if (!drafts) throw new Error('No Drafts folder found on this account')
+    await c.append(drafts, raw, ['\\Draft'])
+  })
+}
+
 // Delete a message (used to remove a draft once it's been sent).
 export async function deleteMessage(account: MailAccount, mailbox: string, uid: number): Promise<void> {
   return withImap(account, async (c) => {
