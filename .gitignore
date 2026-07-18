@@ -10,6 +10,8 @@ zaim.db
 zaim.db-*
 
 release/
+build/
+*.tsbuildinfo
 
 # graphify
 graphify-out/
