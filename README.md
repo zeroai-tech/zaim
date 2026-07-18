@@ -14,17 +14,32 @@ Built by **ZeroAI**.
 
 ## Why
 
-Every AI coding agent can write an email — none can *send* one safely from your real mailbox. Zaim is the secure bridge: your accounts stay encrypted on your own deployment, and agents act through a scoped, key-gated API instead of touching raw credentials.
+Every AI coding agent can write an email — none can *send* one safely from your real mailbox. Zaim is the secure bridge: your accounts stay encrypted, and agents act through a scoped, key-gated API instead of touching raw credentials.
 
-## Quick start
+## Already have a Zaim link (e.g. from your company)?
+
+You don't need Vercel, `.env`, or anything below this section. Zaim runs multi-user:
+
+1. Open the app (e.g. `https://zaim.zeroaitech.tech`) and **sign up** with an email + password.
+2. Add your own mailbox from the app (IMAP/SMTP host, user, password) — it's encrypted per-user, nobody else can see it.
+3. Click your avatar (top right) → **🔑 Agent keys** → generate a key. That's your `ZAIM_API_KEY`.
+4. Give that key to your CLI or agent:
+   ```bash
+   export ZAIM_URL=https://zaim.zeroaitech.tech   ZAIM_API_KEY=<the key you just generated>
+   zaim status
+   ```
+
+That's the whole setup. The rest of this README is for standing up a *new* deployment.
+
+## Quick start (deploying your own instance)
 
 ```bash
-cp .env.example .env        # fill in ZAIM_API_KEY + your IMAP/SMTP account
+cp .env.example .env        # see the file — multi-user mode needs only 2-3 server secrets
 npm install
 npm run dev                 # → http://localhost:3000
 ```
 
-Open the web app, enter your `ZAIM_API_KEY`, and you're in.
+In multi-user mode (recommended — see `.env.example`), you only set `POSTGRES_URL` + `ZAIM_ENC_KEY` (+ optionally `ZAIM_SESSION_SECRET`) once per deployment. Every user then signs up and configures their *own* mailbox and keys from the UI — the IMAP/SMTP/`ZAIM_API_KEY` block in `.env.example` is only for the older single-shared-account mode, and isn't needed for a normal multi-user deployment.
 
 ## The agent / CLI surface
 
@@ -49,14 +64,20 @@ Every command maps to an HTTP endpoint (`GET /api/mail/list`, `GET /api/mail/mes
 ## Deploy to Vercel
 
 ```bash
-vercel        # set the ZAIM_* env vars in the Vercel dashboard
+vercel
+# In the Vercel dashboard, set:
+#   POSTGRES_URL        — Neon/Supabase/Vercel Postgres connection string
+#   ZAIM_ENC_KEY         — openssl rand -hex 32
+#   ZAIM_SESSION_SECRET  — openssl rand -hex 32 (optional, falls back to ZAIM_ENC_KEY)
+# That's it for multi-user mode — do NOT set the IMAP/SMTP/ZAIM_API_KEY block,
+# those are single-account-mode only and users will configure their own instead.
 ```
 API routes run on the Node.js runtime (imapflow/nodemailer), one connection per request — serverless-friendly.
 
 ## Roadmap
 
-- **Phase 1 (this repo)** — web client + agent API + CLI on one secure single-account core ✅
-- **Phase 2** — per-user auth + encrypted multi-account **vault** (companies, teams)
+- **Phase 1** — web client + agent API + CLI on one secure single-account core ✅
+- **Phase 2** — per-user auth + encrypted multi-account **vault** (companies, teams) ✅
 - **Phase 3** — installable desktop app (Electron)
 - **Phase 4** — full ZeroAI-family branding + marketing launch
 
