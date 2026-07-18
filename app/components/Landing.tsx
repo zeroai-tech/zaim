@@ -304,9 +304,14 @@ zaim send --to ceo@acme.com \\
         </div>
       </section>
 
-      <footer className="max-w-6xl mx-auto px-6 py-8 flex items-center gap-2 text-xs text-[color:var(--muted)]" style={{ borderTop: '1px solid var(--line)' }}>
+      <footer className="max-w-6xl mx-auto px-6 py-8 flex items-center gap-3 text-xs text-[color:var(--muted)]" style={{ borderTop: '1px solid var(--line)' }}>
         <Mark /><span className="font-semibold">Zaim</span> <span>— a ZeroAI product. Secure mail for humans and their agents.</span>
-        <span className="ml-auto">© {new Date().getFullYear()} ZeroAI Technologies</span>
+        <span className="ml-auto flex items-center gap-2">
+          © {new Date().getFullYear()}
+          <span className="inline-flex items-center bg-white rounded-md px-2 py-1">
+            <img src="/zeroai-wordmark.png" alt="ZeroAI Technologies" className="h-4 w-auto" />
+          </span>
+        </span>
       </footer>
 
       {authMode && <AuthModal mode={authMode} onClose={closeAuth} onDone={onDone} />}
