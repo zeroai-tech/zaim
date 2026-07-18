@@ -18,6 +18,7 @@ export async function POST(req: Request) {
   try {
     await saveDraft(r.ctx.account, {
       to, subject, html: body.html, text: body.text, cc: body.cc, bcc: body.bcc, replyTo: body.replyTo,
+      attachments: Array.isArray(body.attachments) ? body.attachments : undefined,
     })
     return json({ ok: true })
   } catch (e) {
