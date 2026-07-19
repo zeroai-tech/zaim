@@ -4,6 +4,10 @@ import { saveDraft } from '@/lib/mail'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+// Same reasoning as /api/mail/send: a large attachment (base64-inflated) plus
+// a single IMAP append is real network work that can outlast the platform's
+// default budget, producing an opaque gateway error instead of our own.
+export const maxDuration = 60
 
 // POST — compose a message and save it to the Drafts folder. Never sends via
 // SMTP; purely an IMAP APPEND, so it's safe for preparing outreach that needs
