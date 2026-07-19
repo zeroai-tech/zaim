@@ -29,12 +29,19 @@ export interface MailFull extends MailSummary {
   attachments: MailAttachmentMeta[]
 }
 
+// imapflow's own defaults (90s connect, 5min socket) far outlast a serverless
+// function's execution budget -- a stalled connection would hang until the
+// platform kills the function from outside, producing an opaque 502 our own
+// code never gets a chance to catch or explain. Fail fast instead.
 async function withImap<T>(account: MailAccount, fn: (c: ImapFlow) => Promise<T>): Promise<T> {
   const { imap } = account
   const client = new ImapFlow({
     host: imap.host, port: imap.port, secure: imap.secure,
     auth: { user: imap.user, pass: imap.pass },
     logger: false,
+    connectionTimeout: 10_000,
+    greetingTimeout: 8_000,
+    socketTimeout: 20_000,
   })
   await client.connect()
   try { return await fn(client) } finally { await client.logout().catch(() => {}) }
@@ -172,10 +179,15 @@ function buildRaw(account: MailAccount, input: SendInput): Promise<Buffer> {
   return new Promise((resolve, reject) => mc.compile().build((e: Error | null, msg: Buffer) => (e ? reject(e) : resolve(msg))))
 }
 
+// nodemailer's own default connectionTimeout is 2 minutes -- same problem as
+// imapflow's defaults in withImap() above, same fix: fail fast rather than
+// outlasting the serverless function that's waiting on it.
+const smtpTimeouts = { connectionTimeout: 10_000, greetingTimeout: 8_000, socketTimeout: 20_000 }
+
 export async function sendMail(account: MailAccount, input: SendInput): Promise<{ messageId: string; raw: Buffer }> {
   const { smtp, from } = account
   const raw = await buildRaw(account, input)
-  const t = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.secure, auth: { user: smtp.user, pass: smtp.pass } })
+  const t = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.secure, auth: { user: smtp.user, pass: smtp.pass }, ...smtpTimeouts })
   const to = [input.to, input.cc, input.bcc].filter(Boolean).join(',')
   const info = await t.sendMail({ envelope: { from: from.email, to }, raw })
   return { messageId: info.messageId, raw }
@@ -281,7 +293,7 @@ export async function verify(account: MailAccount): Promise<{ imap: boolean; smt
   try { await withImap(account, async () => {}); res.imap = true } catch (e) { res.error = 'IMAP: ' + (e as Error).message }
   try {
     const { smtp } = account
-    const t = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.secure, auth: { user: smtp.user, pass: smtp.pass } })
+    const t = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.secure, auth: { user: smtp.user, pass: smtp.pass }, ...smtpTimeouts })
     await t.verify(); res.smtp = true
   } catch (e) { res.error = (res.error ? res.error + ' | ' : '') + 'SMTP: ' + (e as Error).message }
   return res
