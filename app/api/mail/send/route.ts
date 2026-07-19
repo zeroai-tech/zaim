@@ -4,6 +4,12 @@ import { sendMail, appendToSent, deleteMessage } from '@/lib/mail'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+// The platform's default function budget is too tight for this route: SMTP
+// send plus IMAP cleanup is real network work against a mail host we don't
+// control, and getting cut off mid-flight produces an opaque 502 (Cloudflare's
+// own error page, generated because the origin never responded in time) rather
+// than a catchable error from our own code. Give it real headroom.
+export const maxDuration = 60
 
 export async function POST(req: Request) {
   const r = await resolveForRequest(req)
@@ -17,18 +23,24 @@ export async function POST(req: Request) {
       to, subject, html: body.html, text: body.text, cc: body.cc, bcc: body.bcc, replyTo: body.replyTo,
       attachments: Array.isArray(body.attachments) ? body.attachments : undefined,
     })
-    // Keep a copy in Sent (best-effort — never fail the send over this, but never go silent either).
+    // Sent-copy and draft-cleanup are two independent IMAP connections — run
+    // them side by side instead of one after another so the request's total
+    // wall-clock time (which is what the platform's patience is measured
+    // against) doesn't just keep stacking up, especially with a large
+    // attachment already having eaten into the budget for the send itself.
+    const [sentResult, draftResult] = await Promise.allSettled([
+      body.saveToSent !== false ? appendToSent(r.ctx.account, raw) : Promise.resolve(),
+      body.draft?.uid && body.draft?.mailbox ? deleteMessage(r.ctx.account, String(body.draft.mailbox), Number(body.draft.uid)) : Promise.resolve(),
+    ])
     let sentWarning: string | undefined
-    if (body.saveToSent !== false) {
-      try { await appendToSent(r.ctx.account, raw) }
-      catch (e) { sentWarning = 'Sent, but could not save a copy to Sent.'; console.error('[mail/send] appendToSent failed:', (e as Error).message) }
+    if (sentResult.status === 'rejected') {
+      sentWarning = 'Sent, but could not save a copy to Sent.'
+      console.error('[mail/send] appendToSent failed:', (sentResult.reason as Error)?.message)
     }
-    // If this send came from a draft, remove that draft so it doesn't linger — same rule: never fail
-    // the send over cleanup, but never swallow the error either, so a lingering draft is diagnosable.
     let draftWarning: string | undefined
-    if (body.draft?.uid && body.draft?.mailbox) {
-      try { await deleteMessage(r.ctx.account, String(body.draft.mailbox), Number(body.draft.uid)) }
-      catch (e) { draftWarning = 'Sent, but could not remove the original draft.'; console.error('[mail/send] deleteMessage (draft cleanup) failed:', (e as Error).message) }
+    if (draftResult.status === 'rejected') {
+      draftWarning = 'Sent, but could not remove the original draft.'
+      console.error('[mail/send] deleteMessage (draft cleanup) failed:', (draftResult.reason as Error)?.message)
     }
     return json({ ok: true, messageId, ...(sentWarning && { sentWarning }), ...(draftWarning && { draftWarning }) })
   } catch (e) {
