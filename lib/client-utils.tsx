@@ -15,8 +15,13 @@ export type Account = { id: string; label: string; email: string; isDefault: boo
 export type Folder = { key: string; label: string; icon: string; path: string }
 export type SmartView = 'unread' | 'today' | null
 
+// Never throw: a rejected fetch (network drop, timeout) or a non-JSON error
+// page (e.g. a gateway timeout) used to reject silently, which left callers'
+// loading/sending state stuck forever since their `.then`/`finally` never ran.
 export const api = (path: string, init?: RequestInit) =>
-  fetch(path, { ...init, credentials: 'include', headers: { 'content-type': 'application/json', ...(init?.headers || {}) } }).then((r) => r.json())
+  fetch(path, { ...init, credentials: 'include', headers: { 'content-type': 'application/json', ...(init?.headers || {}) } })
+    .then((r) => r.json())
+    .catch(() => ({ ok: false, error: 'Network error — please try again.' }))
 export const q = (params: Record<string, string | undefined>) =>
   '?' + Object.entries(params).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v!)}`).join('&')
 

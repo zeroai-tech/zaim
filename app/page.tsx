@@ -86,15 +86,24 @@ export default function Zaim() {
     setLoadingDraft(true)
     const mailbox = folders.find((f) => f.key === activeFolder)?.path || 'INBOX'
     const attachments: Att[] = []
-    for (let i = 0; i < (sel.attachments?.length || 0); i++) {
-      const meta = sel.attachments![i]
-      const res = await fetch('/api/mail/attachment' + q({ uid: String(sel.uid), mailbox, index: String(i), account: activeAccount }), { credentials: 'include' })
-      const blob = await res.blob()
-      const content = await new Promise<string>((r) => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(',')[1] || ''); fr.readAsDataURL(blob) })
-      attachments.push({ name: meta.filename, size: meta.size, content, contentType: meta.contentType })
+    // A failed or slow attachment fetch (IMAP hiccup, timeout) used to leave
+    // loadingDraft stuck true forever with no error — the button just hung on
+    // "Loading..." with no way to retry. Always land back in an idle state.
+    try {
+      for (let i = 0; i < (sel.attachments?.length || 0); i++) {
+        const meta = sel.attachments![i]
+        const res = await fetch('/api/mail/attachment' + q({ uid: String(sel.uid), mailbox, index: String(i), account: activeAccount }), { credentials: 'include' })
+        if (!res.ok) throw new Error(`Could not load attachment "${meta.filename}" — please try again.`)
+        const blob = await res.blob()
+        const content = await new Promise<string>((r) => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(',')[1] || ''); fr.readAsDataURL(blob) })
+        attachments.push({ name: meta.filename, size: meta.size, content, contentType: meta.contentType })
+      }
+      setCompose({ to: sel.to, cc: sel.cc, subject: sel.subject, html: sel.html || '', text: sel.text || undefined, attachments, draft: { uid: sel.uid, mailbox } })
+    } catch (e) {
+      alert((e as Error).message || 'Could not load this draft — please try again.')
+    } finally {
+      setLoadingDraft(false)
     }
-    setLoadingDraft(false)
-    setCompose({ to: sel.to, cc: sel.cc, subject: sel.subject, html: sel.html || '', text: sel.text || undefined, attachments, draft: { uid: sel.uid, mailbox } })
   }
   // Open a message found via mailbox-wide attachment search — it may live in a
   // different folder than the one currently active, so switch to it first.
