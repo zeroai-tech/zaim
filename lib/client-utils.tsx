@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
 export type Msg = { uid: number; subject: string; from: string; fromName: string; to: string; date: string; seen: boolean; flagged: boolean }
 export type Full = Msg & { html: string | null; text: string | null; cc?: string; attachments?: { filename: string; contentType: string; size: number }[] }
 export type Att = { name: string; size: number; content: string; contentType: string }
-export type ComposeInit = { to: string; subject: string; cc?: string; html?: string; attachments?: Att[]; draft?: { uid: number; mailbox: string } }
+export type ComposeInit = { to: string; subject: string; cc?: string; html?: string; text?: string; attachments?: Att[]; draft?: { uid: number; mailbox: string } }
 export type Account = { id: string; label: string; email: string; isDefault: boolean }
 export type Folder = { key: string; label: string; icon: string; path: string }
 export type SmartView = 'unread' | 'today' | null

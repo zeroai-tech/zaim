@@ -13,7 +13,14 @@ export function Compose({ initial, from, account, onClose, onSent }: { initial: 
   const [sending, setSending] = useState(false); const [error, setError] = useState('')
   const ed = useRef<HTMLDivElement>(null); const fileIn = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { if (ed.current && initial.html) ed.current.innerHTML = initial.html }, [initial.html])
+  // A draft saved with only a plain-text body (no html part) has no `initial.html`
+  // at all — fall back to the text so its content isn't silently dropped.
+  useEffect(() => {
+    if (!ed.current) return
+    if (initial.html) ed.current.innerHTML = initial.html
+    else if (initial.text) ed.current.innerHTML = initial.text
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
+  }, [initial.html, initial.text])
   const exec = (cmd: string, val?: string) => { document.execCommand(cmd, false, val); ed.current?.focus() }
   async function addFiles(files: FileList | null) {
     if (!files) return

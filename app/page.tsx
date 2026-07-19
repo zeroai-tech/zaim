@@ -82,7 +82,7 @@ export default function Zaim() {
       attachments.push({ name: meta.filename, size: meta.size, content, contentType: meta.contentType })
     }
     setLoadingDraft(false)
-    setCompose({ to: sel.to, cc: sel.cc, subject: sel.subject, html: sel.html || '', attachments, draft: { uid: sel.uid, mailbox } })
+    setCompose({ to: sel.to, cc: sel.cc, subject: sel.subject, html: sel.html || '', text: sel.text || undefined, attachments, draft: { uid: sel.uid, mailbox } })
   }
   // Open a message found via mailbox-wide attachment search — it may live in a
   // different folder than the one currently active, so switch to it first.
