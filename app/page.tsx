@@ -53,13 +53,25 @@ export default function Zaim() {
     api('/api/mail/folders' + q({ account: activeAccount })).then((r) => { if (r.ok) setFolders(r.folders) })
   }, [phase, activeAccount])
 
+  const loadSeq = useRef(0)
+  // Resolve to the mailbox *path* (a stable string), not the folders array itself —
+  // once the real folder list arrives it's a new array reference even when the
+  // path for the active folder hasn't changed, which used to re-trigger a fully
+  // redundant duplicate fetch of the same list right after the first one ran.
+  const activeMailbox = folders.find((x) => x.key === activeFolder)?.path || 'INBOX'
   const load = useCallback(() => {
     if (!activeAccount) return
-    const f = folders.find((x) => x.key === activeFolder)
+    // Tag each request with a sequence number so an older, still-in-flight
+    // request can't clobber a newer one that already resolved — without this,
+    // switching folders (or reloading after a send) while a prior fetch is
+    // still pending could let stale data (e.g. a Drafts list) overwrite the
+    // list for the folder you're actually looking at now.
+    const seq = ++loadSeq.current
     setListLoading(true); setSel(null); setSelUid(null)
-    api('/api/mail/list' + q({ limit: '40', mailbox: f?.path || 'INBOX', flagged: activeFolder === 'starred' ? '1' : undefined, account: activeAccount }))
-      .then((r) => setMessages(r.messages || [])).finally(() => setListLoading(false))
-  }, [activeAccount, activeFolder, folders])
+    api('/api/mail/list' + q({ limit: '40', mailbox: activeMailbox, flagged: activeFolder === 'starred' ? '1' : undefined, account: activeAccount }))
+      .then((r) => { if (seq === loadSeq.current) setMessages(r.messages || []) })
+      .finally(() => { if (seq === loadSeq.current) setListLoading(false) })
+  }, [activeAccount, activeFolder, activeMailbox])
   useEffect(() => { if (phase === 'app') load() }, [phase, load])
 
   async function open(uid: number) {
