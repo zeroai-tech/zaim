@@ -29,6 +29,7 @@ export default function Zaim() {
   const [listLoading, setListLoading] = useState(false)
   const [compose, setCompose] = useState<null | ComposeInit>(null)
   const [loadingDraft, setLoadingDraft] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [showKeys, setShowKeys] = useState(false)
   const [avatar, setAvatar] = useState<string>('')
   const [showProfile, setShowProfile] = useState(false)
@@ -105,6 +106,28 @@ export default function Zaim() {
       setLoadingDraft(false)
     }
   }
+  // Delete the open message. If a Trash folder exists and we're not already in
+  // it, move it there (recoverable); otherwise (already in Trash, or no Trash
+  // folder on this account) permanently expunge, after confirming. The list is
+  // updated optimistically so the message vanishes immediately, then reloaded.
+  async function deleteMail() {
+    if (!sel) return
+    const mailbox = folders.find((f) => f.key === activeFolder)?.path || 'INBOX'
+    const trash = folders.find((f) => f.key === 'trash')?.path
+    const permanent = !trash || trash === mailbox
+    if (permanent && !confirm('Permanently delete this message? This cannot be undone.')) return
+    const uid = sel.uid
+    setDeleting(true)
+    const r = await api(`/api/mail/message/${uid}` + q({ mailbox, to: permanent ? undefined : trash, account: activeAccount }), { method: 'DELETE' })
+    setDeleting(false)
+    if (r.ok) {
+      setMessages((m) => m.filter((x) => x.uid !== uid))
+      setSel(null); setSelUid(null)
+      load()
+    } else {
+      alert(r.error || 'Could not delete this message — please try again.')
+    }
+  }
   // Open a message found via mailbox-wide attachment search — it may live in a
   // different folder than the one currently active, so switch to it first.
   async function openFromSearch(mailbox: string, uid: number) {
@@ -159,7 +182,7 @@ export default function Zaim() {
         <div className="flex-1 min-w-0 h-full" style={{ borderRight: '1px solid var(--line)' }}>
           <ReadingCanvas
             sel={sel} selUid={selUid} activeFolder={activeFolder} folders={folders} activeAccount={activeAccount}
-            loadingDraft={loadingDraft} onEditDraft={editDraft}
+            loadingDraft={loadingDraft} onEditDraft={editDraft} deleting={deleting} onDelete={deleteMail}
             onReply={() => sel && setCompose({ to: sel.from.replace(/.*<|>.*/g, ''), subject: 'Re: ' + sel.subject })}
             compose={compose} from={active?.email} account={activeAccount}
             onComposeClose={() => setCompose(null)} onComposeSent={() => { setCompose(null); load() }}

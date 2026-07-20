@@ -10,11 +10,11 @@ function Empty() {
 }
 
 export function ReadingCanvas({
-  sel, selUid, activeFolder, folders, activeAccount, loadingDraft, onEditDraft, onReply,
+  sel, selUid, activeFolder, folders, activeAccount, loadingDraft, onEditDraft, deleting, onDelete, onReply,
   compose, from, account, onComposeClose, onComposeSent,
 }: {
   sel: Full | null; selUid: number | null; activeFolder: string; folders: Folder[]; activeAccount: string
-  loadingDraft: boolean; onEditDraft: () => void; onReply: () => void
+  loadingDraft: boolean; onEditDraft: () => void; deleting: boolean; onDelete: () => void; onReply: () => void
   compose: ComposeInit | null; from?: string; account: string; onComposeClose: () => void; onComposeSent: () => void
 }) {
   if (compose) return <Compose initial={compose} from={from} account={account} onClose={onComposeClose} onSent={onComposeSent} />
@@ -32,6 +32,8 @@ export function ReadingCanvas({
           {activeFolder === 'drafts'
             ? <button onClick={onEditDraft} disabled={loadingDraft} className="text-xs font-semibold px-3 py-1.5 rounded-lg accent-grad text-white hover:opacity-90 disabled:opacity-50 shrink-0">{loadingDraft ? 'Loading…' : '✏️ Edit & Send'}</button>
             : <button data-testid="reply-button" onClick={onReply} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 shrink-0">↩ Reply</button>}
+          <button data-testid="delete-button" onClick={onDelete} disabled={deleting} title={activeFolder === 'trash' ? 'Delete permanently' : 'Move to Trash'}
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 hover:text-red-400 disabled:opacity-50 shrink-0">{deleting ? 'Deleting…' : '🗑 Delete'}</button>
         </div>
 
         {sel!.attachments && sel!.attachments.length > 0 && (
