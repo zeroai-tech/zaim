@@ -4,6 +4,7 @@ import { getMessage, deleteMessage } from '@/lib/mail'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 30
 
 export async function GET(req: Request, ctx: { params: Promise<{ uid: string }> }) {
   const r = await resolveForRequest(req)

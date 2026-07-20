@@ -4,6 +4,7 @@ import { getAttachment } from '@/lib/mail'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 30
 
 // GET ?uid=&mailbox=&index= → stream one attachment as a download.
 export async function GET(req: Request) {

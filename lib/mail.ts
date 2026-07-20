@@ -32,16 +32,19 @@ export interface MailFull extends MailSummary {
 // imapflow's own defaults (90s connect, 5min socket) far outlast a serverless
 // function's execution budget -- a stalled connection would hang until the
 // platform kills the function from outside, producing an opaque 502 our own
-// code never gets a chance to catch or explain. Fail fast instead.
+// code never gets a chance to catch or explain. Fail fast instead -- but not
+// TOO fast: 8s greeting turned out to be tighter than this account's real
+// mail host needs under normal (non-stalled) conditions, so every call
+// started failing outright instead of just the genuinely-stuck ones.
 async function withImap<T>(account: MailAccount, fn: (c: ImapFlow) => Promise<T>): Promise<T> {
   const { imap } = account
   const client = new ImapFlow({
     host: imap.host, port: imap.port, secure: imap.secure,
     auth: { user: imap.user, pass: imap.pass },
     logger: false,
-    connectionTimeout: 10_000,
-    greetingTimeout: 8_000,
-    socketTimeout: 20_000,
+    connectionTimeout: 20_000,
+    greetingTimeout: 15_000,
+    socketTimeout: 30_000,
   })
   await client.connect()
   try { return await fn(client) } finally { await client.logout().catch(() => {}) }
@@ -182,7 +185,7 @@ function buildRaw(account: MailAccount, input: SendInput): Promise<Buffer> {
 // nodemailer's own default connectionTimeout is 2 minutes -- same problem as
 // imapflow's defaults in withImap() above, same fix: fail fast rather than
 // outlasting the serverless function that's waiting on it.
-const smtpTimeouts = { connectionTimeout: 10_000, greetingTimeout: 8_000, socketTimeout: 20_000 }
+const smtpTimeouts = { connectionTimeout: 20_000, greetingTimeout: 15_000, socketTimeout: 30_000 }
 
 export async function sendMail(account: MailAccount, input: SendInput): Promise<{ messageId: string; raw: Buffer }> {
   const { smtp, from } = account

@@ -4,6 +4,7 @@ import { listFolders } from '@/lib/mail'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 30
 
 // GET → the named folders (Inbox/Sent/Drafts/…) this account actually has.
 export async function GET(req: Request) {
