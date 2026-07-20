@@ -4,6 +4,7 @@ import { searchAttachments } from '@/lib/mail'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 45
 
 // GET → attachments across every folder in this account, optionally filtered
 // by filename. Metadata only (no bytes) — download still goes through the
