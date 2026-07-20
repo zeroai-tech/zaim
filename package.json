@@ -5,7 +5,8 @@
   "description": "Zaim — a secure, stylish mail client with an agent API. Human webapp + CLI + AI-agent control (Claude Code, Gemini, Codex). By ZeroAI.",
   "type": "module",
   "bin": {
-    "zaim": "./bin/zaim.mjs"
+    "zaim": "./bin/zaim.mjs",
+    "zaim-mcp": "./bin/zaim-mcp.mjs"
   },
   "scripts": {
     "dev": "next dev",
@@ -13,6 +14,7 @@
     "start": "next start",
     "lint": "next lint",
     "cli": "node ./bin/zaim.mjs",
+    "mcp": "node ./bin/zaim-mcp.mjs",
     "desktop:dev": "next build && electron .",
     "desktop:dist": "next build && node electron/stage.cjs && electron-builder"
   },
