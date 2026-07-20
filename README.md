@@ -6,6 +6,7 @@ Zaim is a mail client with three faces on one secure core:
 
 - **Web app** — a clean, fast, Outlook-class inbox. Deploy to Vercel; a company runs its own.
 - **CLI** — `zaim list / read / send`, so agents like **Claude Code, Gemini, and Codex** manage professional email from a tool call.
+- **MCP server** — the same mailbox as first-class Model Context Protocol tools (`zaim_list`, `zaim_read`, `zaim_send`, `zaim_draft`, `zaim_delete`), so any MCP client drives it natively.
 - **API** — the same endpoints the web app uses, key-authenticated, ready for any integration.
 
 Built by **ZeroAI**.
@@ -54,6 +55,27 @@ zaim send --to principal@school.org --subject "Follow-up" --body "…" --json
 
 Every command maps to an HTTP endpoint (`GET /api/mail/list`, `GET /api/mail/message/:uid`, `POST /api/mail/send`), authenticated with `Authorization: Bearer $ZAIM_API_KEY`. That's the whole contract an agent needs.
 
+## MCP server
+
+For MCP clients (Claude Code, Codex, etc.), Zaim ships a stdio MCP server that
+exposes the mailbox as native tools — `zaim_status`, `zaim_folders`,
+`zaim_list`, `zaim_read`, `zaim_send`, `zaim_draft`, `zaim_delete` — so an agent
+manages mail through tool calls instead of shelling out. It's zero-dependency
+(pure Node, same as the CLI) and reads the same `ZAIM_URL` / `ZAIM_API_KEY`.
+
+Register it with Claude Code:
+
+```bash
+claude mcp add zaim -s user \
+  -e ZAIM_URL=https://mail.yourco.com \
+  -e ZAIM_API_KEY=zaim_… \
+  -- node /path/to/zaim/bin/zaim-mcp.mjs
+```
+
+Or point any MCP client at `node bin/zaim-mcp.mjs` (stdio transport) with those
+two env vars set. `zaim_send` sends immediately; `zaim_draft` only ever writes
+to Drafts (no SMTP), so agent-prepared outreach can't go out unreviewed.
+
 ## Security posture
 
 - **No plaintext at rest** — mailbox passwords can be stored AES-256-GCM encrypted (`ZAIM_ENC_KEY`); `zaim encrypt "<pw>"` produces the value.
@@ -79,6 +101,7 @@ API routes run on the Node.js runtime (imapflow/nodemailer), one connection per 
 - **Phase 1** — web client + agent API + CLI on one secure single-account core ✅
 - **Phase 2** — per-user auth + encrypted multi-account **vault** (companies, teams) ✅
 - **Phase 3** — installable desktop app (Electron) ✅
+- **MCP server** — native Model Context Protocol tools for any MCP client ✅
 - **Phase 4** — full ZeroAI-family branding + marketing launch
 
 ---
