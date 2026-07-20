@@ -32,7 +32,7 @@ export function ReadingCanvas({
           {activeFolder === 'drafts'
             ? <button onClick={onEditDraft} disabled={loadingDraft} className="text-xs font-semibold px-3 py-1.5 rounded-lg accent-grad text-white hover:opacity-90 disabled:opacity-50 shrink-0">{loadingDraft ? 'Loading…' : '✏️ Edit & Send'}</button>
             : <button data-testid="reply-button" onClick={onReply} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 shrink-0">↩ Reply</button>}
-          <button data-testid="delete-button" onClick={onDelete} disabled={deleting} title={activeFolder === 'trash' ? 'Delete permanently' : 'Move to Trash'}
+          <button data-testid="delete-button" onClick={() => onDelete()} disabled={deleting} title={activeFolder === 'trash' ? 'Delete permanently' : 'Move to Trash'}
             className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 hover:text-red-400 disabled:opacity-50 shrink-0">{deleting ? 'Deleting…' : '🗑 Delete'}</button>
         </div>
 
@@ -51,7 +51,20 @@ export function ReadingCanvas({
         )}
 
         <div className="rounded-2xl overflow-hidden mt-6" style={{ border: '1px solid var(--line)' }}>
-          <iframe title="message" sandbox="" className="w-full bg-white" style={{ height: '60vh' }} srcDoc={sel!.html || `<pre style="font-family:system-ui;white-space:pre-wrap;padding:24px;color:#111">${(sel!.text || '').replace(/</g, '&lt;')}</pre>`} />
+          {/* `<base target="_blank">` makes every link in the email open in a new
+              browser tab instead of navigating this sandboxed iframe to the
+              destination — which used to load the (often frame-busting)
+              confirmation page inside the tiny pane and appear to freeze.
+              sandbox stays script- and same-origin-locked; we only add popups so
+              those new-tab links can actually open, and let the opened tab
+              escape the sandbox so the real page works normally. */}
+          <iframe
+            title="message"
+            sandbox="allow-popups allow-popups-to-escape-sandbox"
+            className="w-full bg-white"
+            style={{ height: '60vh' }}
+            srcDoc={`<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body>${sel!.html || `<pre style="font-family:system-ui;white-space:pre-wrap;padding:24px;color:#111">${(sel!.text || '').replace(/</g, '&lt;')}</pre>`}</body></html>`}
+          />
         </div>
       </div>
     </div>

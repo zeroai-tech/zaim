@@ -106,23 +106,24 @@ export default function Zaim() {
       setLoadingDraft(false)
     }
   }
-  // Delete the open message. If a Trash folder exists and we're not already in
-  // it, move it there (recoverable); otherwise (already in Trash, or no Trash
-  // folder on this account) permanently expunge, after confirming. The list is
-  // updated optimistically so the message vanishes immediately, then reloaded.
-  async function deleteMail() {
-    if (!sel) return
+  // Delete a message — the open one (reading pane) or any row (list). If a Trash
+  // folder exists and we're not already in it, move it there (recoverable);
+  // otherwise (already in Trash, or no Trash folder on this account) permanently
+  // expunge, after confirming. The list is updated optimistically so the message
+  // vanishes immediately, then reloaded.
+  async function deleteMail(uid?: number) {
+    const target = uid ?? sel?.uid
+    if (target == null) return
     const mailbox = folders.find((f) => f.key === activeFolder)?.path || 'INBOX'
     const trash = folders.find((f) => f.key === 'trash')?.path
     const permanent = !trash || trash === mailbox
     if (permanent && !confirm('Permanently delete this message? This cannot be undone.')) return
-    const uid = sel.uid
     setDeleting(true)
-    const r = await api(`/api/mail/message/${uid}` + q({ mailbox, to: permanent ? undefined : trash, account: activeAccount }), { method: 'DELETE' })
+    const r = await api(`/api/mail/message/${target}` + q({ mailbox, to: permanent ? undefined : trash, account: activeAccount }), { method: 'DELETE' })
     setDeleting(false)
     if (r.ok) {
-      setMessages((m) => m.filter((x) => x.uid !== uid))
-      setSel(null); setSelUid(null)
+      setMessages((m) => m.filter((x) => x.uid !== target))
+      if (selUid === target) { setSel(null); setSelUid(null) }
       load()
     } else {
       alert(r.error || 'Could not delete this message — please try again.')
@@ -176,7 +177,7 @@ export default function Zaim() {
         </Collapsible>
 
         <div className="w-[360px] shrink-0 h-full" style={{ borderRight: '1px solid var(--line)' }}>
-          <ConversationList messages={visibleMessages} activeFolder={activeFolder} selUid={selUid} listLoading={listLoading} folderTitle={folderTitle} onOpen={open} onRefresh={load} />
+          <ConversationList messages={visibleMessages} activeFolder={activeFolder} selUid={selUid} listLoading={listLoading} folderTitle={folderTitle} onOpen={open} onRefresh={load} onDelete={deleteMail} deleting={deleting} />
         </div>
 
         <div className="flex-1 min-w-0 h-full" style={{ borderRight: '1px solid var(--line)' }}>
