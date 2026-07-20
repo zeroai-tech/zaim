@@ -2,12 +2,13 @@
 import { Msg, Avatar, emailOf, when } from '@/lib/client-utils'
 
 export function ConversationList({
-  messages, activeFolder, selUid, listLoading, folderTitle, onOpen, onRefresh,
+  messages, activeFolder, selUid, listLoading, folderTitle, onOpen, onRefresh, onDelete, deleting,
 }: {
   messages: Msg[]; activeFolder: string; selUid: number | null; listLoading: boolean; folderTitle: string
-  onOpen: (uid: number) => void; onRefresh: () => void
+  onOpen: (uid: number) => void; onRefresh: () => void; onDelete: (uid: number) => void; deleting: boolean
 }) {
   const isSentLike = activeFolder === 'sent' || activeFolder === 'drafts'
+  const trashLabel = activeFolder === 'trash' ? 'Delete permanently' : 'Move to Trash'
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -21,12 +22,18 @@ export function ConversationList({
         {!listLoading && messages.map((m) => {
           const who = isSentLike ? m.to : (m.fromName || m.from)
           const active = selUid === m.uid
+          // Row is a div (not a button) so the delete control can be a real
+          // nested button — a button inside a button is invalid HTML. Keyboard
+          // access is preserved via role/tabIndex + Enter/Space handling.
           return (
-            <button
+            <div
               key={m.uid}
               data-testid="conversation-card"
+              role="button"
+              tabIndex={0}
               onClick={() => onOpen(m.uid)}
-              className={`w-full text-left px-3 py-2.5 rounded-xl flex gap-3 items-start transition ${active ? 'bg-white/[0.07]' : 'hover:bg-white/[0.035]'}`}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(m.uid) } }}
+              className={`group w-full cursor-pointer text-left px-3 py-2.5 rounded-xl flex gap-3 items-start transition ${active ? 'bg-white/[0.07]' : 'hover:bg-white/[0.035]'}`}
               style={{ border: `1px solid ${active ? 'var(--accent)' : 'var(--line)'}` }}
             >
               <Avatar email={emailOf(isSentLike ? m.to : m.from)} name={who} cls="w-9 h-9 rounded-full text-xs" />
@@ -38,7 +45,14 @@ export function ConversationList({
                 <span className={`block truncate text-[13px] mt-0.5 ${m.seen ? 'text-[color:var(--muted)]' : 'text-white'}`}>{m.flagged && '⭐ '}{m.subject}</span>
               </span>
               {!m.seen && <span className="mt-2 w-2 h-2 rounded-full accent-grad shrink-0" />}
-            </button>
+              <button
+                data-testid="row-delete-button"
+                title={trashLabel}
+                disabled={deleting}
+                onClick={(e) => { e.stopPropagation(); onDelete(m.uid) }}
+                className="mt-0.5 shrink-0 w-6 h-6 grid place-items-center rounded-md text-[color:var(--muted)] opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-white/10 hover:text-red-400 disabled:opacity-50 transition"
+              >🗑</button>
+            </div>
           )
         })}
       </div>
