@@ -221,11 +221,21 @@ export async function saveDraft(account: MailAccount, input: SendInput): Promise
   })
 }
 
-// Delete a message (used to remove a draft once it's been sent).
+// Delete a message (used to remove a draft once it's been sent). Permanent —
+// sets \Deleted and expunges, no Trash copy.
 export async function deleteMessage(account: MailAccount, mailbox: string, uid: number): Promise<void> {
   return withImap(account, async (c) => {
     const lock = await c.getMailboxLock(mailbox)
     try { await c.messageDelete(String(uid), { uid: true }) } finally { lock.release() }
+  })
+}
+
+// Move a message to another folder (e.g. INBOX → Trash), so a user-facing
+// "delete" is recoverable rather than an immediate permanent expunge.
+export async function moveMessage(account: MailAccount, mailbox: string, uid: number, destination: string): Promise<void> {
+  return withImap(account, async (c) => {
+    const lock = await c.getMailboxLock(mailbox)
+    try { await c.messageMove(String(uid), destination, { uid: true }) } finally { lock.release() }
   })
 }
 
