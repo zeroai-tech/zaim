@@ -322,37 +322,61 @@ zaim send --to ceo@acme.com \\
 function AuthModal({ mode: initial, onClose, onDone }: { mode: 'login' | 'register'; onClose: () => void; onDone: () => void }) {
   const [mode, setMode] = useState<'login' | 'register'>(initial)
   const [email, setEmail] = useState(''); const [pw, setPw] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false)
+  // When the signup domain isn't one we host, we ask for + verify the user's own
+  // mail server so a non-existent mailbox can't create an account.
+  const [needsServer, setNeedsServer] = useState(false)
+  const [imapHost, setImapHost] = useState(''); const [imapPort, setImapPort] = useState('993')
+  const [smtpHost, setSmtpHost] = useState(''); const [smtpPort, setSmtpPort] = useState('465')
   async function go() {
     setErr('')
     const em = email.trim().toLowerCase()
     if (mode === 'register') {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) return setErr('Please enter a valid email address.')
       if (pw.length < 8) return setErr('Password must be at least 8 characters.')
+      if (needsServer && !imapHost.trim()) return setErr('Enter your incoming (IMAP) mail server.')
     }
     setBusy(true)
-    const r = await api(`/api/auth/${mode}`, { method: 'POST', body: JSON.stringify({ email: em, password: pw }) })
+    const payload: Record<string, unknown> = { email: em, password: pw }
+    if (mode === 'register' && needsServer)
+      Object.assign(payload, { imapHost: imapHost.trim(), imapPort: +imapPort || 993, smtpHost: smtpHost.trim() || undefined, smtpPort: +smtpPort || 465 })
+    const r = await api(`/api/auth/${mode}`, { method: 'POST', body: JSON.stringify(payload) })
     if (r.ok) { setBusy(false); return onDone() }
-    // The call may have actually succeeded (slow cold-start / dropped response) —
-    // the server sets the session cookie on success. Re-check before showing an
-    // error so a completed sign-up never looks like a failure (then "works" on refresh).
+    // Domain isn't hosted by us → collect the user's mail server and try again.
+    if (r.needsMailServer) { setBusy(false); setNeedsServer(true); setErr(r.error || 'Enter your mail server details to continue.'); return }
+    // May have actually succeeded (slow cold-start) — server sets the cookie on
+    // success; re-check before showing an error so a completed signup isn't a false fail.
     const me = await api('/api/auth/me')
     setBusy(false)
     if (me?.user) return onDone()
     setErr(r.error || 'Something went wrong — please try again.')
   }
+  const smallField = { borderColor: 'var(--line)' as const }
   return (
     <div className="fixed inset-0 grid place-items-center bg-black/60 backdrop-blur-sm z-50 p-6" onClick={onClose}>
       <div className="glass rounded-2xl p-8 w-full max-w-sm fade-in" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 mb-6"><Mark /><span className="font-extrabold text-lg tracking-tight">Zaim</span><button onClick={onClose} className="ml-auto text-[color:var(--muted)] hover:text-white">✕</button></div>
         <h1 className="text-xl font-bold">{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
-        <p className="text-sm text-[color:var(--muted)] mt-1 mb-5">Secure mail for you and your agents.</p>
+        <p className="text-sm text-[color:var(--muted)] mt-1 mb-5">{mode === 'register' ? 'Sign in with your real mailbox — we verify it exists.' : 'Secure mail for you and your agents.'}</p>
         <div className="flex flex-col gap-3">
-          <input className={field} style={{ borderColor: 'var(--line)' }} placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input className={field} style={{ borderColor: 'var(--line)' }} type="password" placeholder={mode === 'register' ? 'password (8+ chars)' : 'password'} value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && go()} />
+          <input className={field} style={smallField} placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+          <input className={field} style={smallField} type="password" placeholder={mode === 'register' ? 'mailbox password (8+ chars)' : 'password'} value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !needsServer && go()} />
+          {mode === 'register' && needsServer && (
+            <div className="flex flex-col gap-2 pt-1 fade-in">
+              <p className="text-xs" style={{ color: 'var(--muted)' }}>Your mail server (from your email provider):</p>
+              <div className="flex gap-2">
+                <input className={field} style={{ ...smallField, flex: 3 }} placeholder="imap.provider.com" value={imapHost} onChange={(e) => setImapHost(e.target.value)} />
+                <input className={field} style={{ ...smallField, flex: 1, minWidth: 0 }} placeholder="993" value={imapPort} onChange={(e) => setImapPort(e.target.value)} />
+              </div>
+              <div className="flex gap-2">
+                <input className={field} style={{ ...smallField, flex: 3 }} placeholder="smtp.provider.com (optional)" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} />
+                <input className={field} style={{ ...smallField, flex: 1, minWidth: 0 }} placeholder="465" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} />
+              </div>
+            </div>
+          )}
         </div>
         {err && <p className="text-xs text-red-400 mt-2">{err}</p>}
-        <button disabled={busy} onClick={go} className="accent-grad text-white font-bold rounded-xl py-3 w-full mt-4 hover:opacity-90 disabled:opacity-50">{busy ? '…' : mode === 'login' ? 'Sign in' : 'Create account'}</button>
-        <button onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setErr('') }} className="text-xs text-[color:var(--muted)] hover:text-white mt-4 w-full text-center">
+        <button disabled={busy} onClick={go} className="accent-grad text-white font-bold rounded-xl py-3 w-full mt-4 hover:opacity-90 disabled:opacity-50">{busy ? '…' : mode === 'login' ? 'Sign in' : needsServer ? 'Verify & create' : 'Create account'}</button>
+        <button onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setErr(''); setNeedsServer(false) }} className="text-xs text-[color:var(--muted)] hover:text-white mt-4 w-full text-center">
           {mode === 'login' ? "No account? Create one" : 'Have an account? Sign in'}
         </button>
       </div>
