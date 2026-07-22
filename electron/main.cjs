@@ -43,7 +43,9 @@ function machineEnv() {
 }
 
 function startServer() {
-  const env = { ...process.env, ...machineEnv(), PORT: String(PORT), HOSTNAME: '127.0.0.1', NODE_ENV: 'production', ELECTRON_RUN_AS_NODE: '1' }
+  // ZAIM_LOCAL_HTTP=1 → session cookie is not marked Secure (we serve over
+  // http://127.0.0.1 locally, where a Secure cookie would be dropped → login fails).
+  const env = { ...process.env, ...machineEnv(), PORT: String(PORT), HOSTNAME: '127.0.0.1', NODE_ENV: 'production', ZAIM_LOCAL_HTTP: '1', ELECTRON_RUN_AS_NODE: '1' }
   child = spawn(process.execPath, [SERVER], { env, cwd: STANDALONE })
   child.stdout.on('data', (d) => process.stdout.write('[zaim] ' + d))
   child.stderr.on('data', (d) => process.stderr.write('[zaim] ' + d))

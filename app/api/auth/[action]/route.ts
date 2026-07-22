@@ -30,8 +30,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
   const email = (body.email || '').trim().toLowerCase()
   const password = body.password || ''
 
+  // A real, single, well-formed address — no spaces, exactly one @, a dotted
+  // TLD of 2+ chars. Rejects the junk (`asdf`, `a@b`, `x@y.`) that used to register.
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && email.length <= 254
+
   if (action === 'register') {
-    if (!email || password.length < 8) return json({ error: 'Email and an 8+ character password required' }, 400)
+    if (!emailValid) return json({ error: 'Please enter a valid email address.' }, 400)
+    if (password.length < 8) return json({ error: 'Password must be at least 8 characters.' }, 400)
     if (await findUserByEmail(email)) return json({ error: 'An account with that email already exists' }, 409)
     const u = await createUser(email, hashPassword(password))
     return cookie(sessionCookie(makeSession(u.id)), { ok: true, user: { id: u.id, email } })

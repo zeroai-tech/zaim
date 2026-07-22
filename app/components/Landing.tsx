@@ -323,10 +323,22 @@ function AuthModal({ mode: initial, onClose, onDone }: { mode: 'login' | 'regist
   const [mode, setMode] = useState<'login' | 'register'>(initial)
   const [email, setEmail] = useState(''); const [pw, setPw] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false)
   async function go() {
-    setErr(''); setBusy(true)
-    const r = await api(`/api/auth/${mode}`, { method: 'POST', body: JSON.stringify({ email, password: pw }) })
+    setErr('')
+    const em = email.trim().toLowerCase()
+    if (mode === 'register') {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) return setErr('Please enter a valid email address.')
+      if (pw.length < 8) return setErr('Password must be at least 8 characters.')
+    }
+    setBusy(true)
+    const r = await api(`/api/auth/${mode}`, { method: 'POST', body: JSON.stringify({ email: em, password: pw }) })
+    if (r.ok) { setBusy(false); return onDone() }
+    // The call may have actually succeeded (slow cold-start / dropped response) —
+    // the server sets the session cookie on success. Re-check before showing an
+    // error so a completed sign-up never looks like a failure (then "works" on refresh).
+    const me = await api('/api/auth/me')
     setBusy(false)
-    if (r.ok) onDone(); else setErr(r.error || 'Failed')
+    if (me?.user) return onDone()
+    setErr(r.error || 'Something went wrong — please try again.')
   }
   return (
     <div className="fixed inset-0 grid place-items-center bg-black/60 backdrop-blur-sm z-50 p-6" onClick={onClose}>
