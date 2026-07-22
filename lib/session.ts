@@ -38,8 +38,11 @@ export function readSession(token: string | undefined): string | null {
 }
 
 export function sessionCookie(token: string): string {
-  const secure = process.env.NODE_ENV === 'production'
-  return `zaim_session=${token}; HttpOnly; Path=/; SameSite=Strict; Max-Age=2592000${secure ? '; Secure' : ''}`
+  // Secure only when actually served over HTTPS. The desktop app serves over
+  // http://127.0.0.1 with NODE_ENV=production, where a `Secure` cookie won't be
+  // stored — so the local-HTTP flag (set by the Electron shell) disables it.
+  const secure = process.env.NODE_ENV === 'production' && process.env.ZAIM_LOCAL_HTTP !== '1'
+  return `zaim_session=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=2592000${secure ? '; Secure' : ''}`
 }
 export const clearCookie = () => 'zaim_session=; HttpOnly; Path=/; Max-Age=0'
 export const userIdFromReq = (req: Request): string | null =>
