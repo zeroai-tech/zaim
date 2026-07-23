@@ -211,6 +211,28 @@ export async function updateAccount(userId: string, accountId: string, e: Accoun
     `UPDATE accounts SET ${sets.join(', ')} WHERE id = $${vals.length - 1} AND user_id = $${vals.length}`, vals)
 }
 
+// ── Admin: bulk-repoint mailboxes left on an old mail host ────────────────────
+// After a server migration, mailboxes added earlier still point IMAP/SMTP at the
+// OLD host, so they send but never receive. This finds every such mailbox (across
+// ALL users — admin only) so they can be moved in one shot. Matched by host
+// substring (case-insensitive) so unrelated accounts (Gmail, etc.) are untouched.
+export interface StaleAccount { id: string; from_email: string; imap_host: string; smtp_host: string }
+export async function findAccountsByHost(hostLike: string): Promise<StaleAccount[]> {
+  const like = `%${hostLike.toLowerCase()}%`
+  return (await ready()).all<StaleAccount>(
+    'SELECT id, from_email, imap_host, smtp_host FROM accounts WHERE LOWER(imap_host) LIKE $1 OR LOWER(smtp_host) LIKE $1', [like])
+}
+export async function repointAccounts(hostLike: string, newHost: string): Promise<StaleAccount[]> {
+  const rows = await findAccountsByHost(hostLike)
+  const d = await ready()
+  for (const r of rows) {
+    await d.run(
+      'UPDATE accounts SET imap_host=$1, imap_port=$2, imap_secure=1, smtp_host=$3, smtp_port=$4, smtp_secure=1 WHERE id=$5',
+      [newHost, 993, newHost, 465, r.id])
+  }
+  return rows
+}
+
 // Resolve the MailAccount (decrypted) for a user's chosen/default account.
 export async function resolveAccount(userId: string, accountId?: string): Promise<MailAccount | null> {
   const rows = await listAccounts(userId)
