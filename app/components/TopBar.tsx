@@ -4,14 +4,14 @@ import { Account, Avatar, Mark, avatarColor, initials } from '@/lib/client-utils
 
 export function TopBar({
   accounts, activeAccount, activeEmail, activeLabel, email, avatar,
-  onSwitchAccount, onAddAccount,
+  onSwitchAccount, onAddAccount, onEditAccount,
   search, onSearch,
   onCompose,
   onShowKeys, onShowProfile, onLogout,
   panelState, onTogglePanel,
 }: {
   accounts: Account[]; activeAccount: string; activeEmail: string; activeLabel: string; email: string; avatar: string
-  onSwitchAccount: (id: string) => void; onAddAccount: () => void
+  onSwitchAccount: (id: string) => void; onAddAccount: () => void; onEditAccount: (id: string) => void
   search: string; onSearch: (v: string) => void
   onCompose: () => void
   onShowKeys: () => void; onShowProfile: () => void; onLogout: () => void
@@ -37,11 +37,14 @@ export function TopBar({
         {acctMenu && (
           <div className="absolute z-20 left-0 top-[42px] w-64 glass rounded-xl p-1.5 shadow-xl fade-in" style={{ border: '1px solid var(--line)' }}>
             {accounts.map((a) => (
-              <button key={a.id} onClick={() => { onSwitchAccount(a.id); setAcctMenu(false) }} className={`w-full flex items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-white/5 ${a.id === activeAccount ? 'bg-white/5' : ''}`}>
-                <span className="w-6 h-6 rounded-md grid place-items-center text-[10px] font-bold text-white shrink-0" style={{ background: avatarColor(a.email) }}>{initials(a.email)}</span>
-                <span className="min-w-0 flex-1"><span className="block text-xs font-semibold truncate">{a.label}</span><span className="block text-[10px] text-[color:var(--muted)] truncate">{a.email}</span></span>
-                {a.id === activeAccount && <span className="text-[color:var(--accent)] text-xs">✓</span>}
-              </button>
+              <div key={a.id} className={`group w-full flex items-center gap-1 rounded-lg pr-1 hover:bg-white/5 ${a.id === activeAccount ? 'bg-white/5' : ''}`}>
+                <button onClick={() => { onSwitchAccount(a.id); setAcctMenu(false) }} className="flex-1 min-w-0 flex items-center gap-2 px-2 py-2 text-left">
+                  <span className="w-6 h-6 rounded-md grid place-items-center text-[10px] font-bold text-white shrink-0" style={{ background: avatarColor(a.email) }}>{initials(a.email)}</span>
+                  <span className="min-w-0 flex-1"><span className="block text-xs font-semibold truncate">{a.label}</span><span className="block text-[10px] text-[color:var(--muted)] truncate">{a.email}</span></span>
+                  {a.id === activeAccount && <span className="text-[color:var(--accent)] text-xs">✓</span>}
+                </button>
+                <button onClick={() => { setAcctMenu(false); onEditAccount(a.id) }} title="Mailbox settings" className="w-7 h-7 rounded-md grid place-items-center text-[color:var(--muted)] hover:text-white hover:bg-white/10 shrink-0 opacity-0 group-hover:opacity-100 transition">⚙</button>
+              </div>
             ))}
             <button onClick={() => { setAcctMenu(false); onAddAccount() }} className="w-full text-left rounded-lg px-2 py-2 text-xs text-[color:var(--muted)] hover:bg-white/5 hover:text-white">+ Add another mailbox</button>
           </div>

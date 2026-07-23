@@ -161,6 +161,56 @@ export async function deleteAccount(userId: string, accountId: string) {
   await (await ready()).run('DELETE FROM accounts WHERE id = $1 AND user_id = $2', [accountId, userId])
 }
 
+// Current settings for the edit form — everything EXCEPT the passwords (secrets
+// never leave the server; the form leaves the password blank = "keep current").
+export interface AccountSettings {
+  id: string; label: string
+  imapHost: string; imapPort: number; imapSecure: boolean; imapUser: string
+  smtpHost: string; smtpPort: number; smtpSecure: boolean; smtpUser: string
+  fromEmail: string; replyTo: string
+}
+export async function getAccount(userId: string, accountId: string): Promise<AccountSettings | null> {
+  const r = (await listAccounts(userId)).find((x) => x.id === accountId)
+  if (!r) return null
+  return {
+    id: r.id, label: r.label,
+    imapHost: r.imap_host, imapPort: r.imap_port, imapSecure: !!r.imap_secure, imapUser: r.imap_user,
+    smtpHost: r.smtp_host, smtpPort: r.smtp_port, smtpSecure: !!r.smtp_secure, smtpUser: r.smtp_user,
+    fromEmail: r.from_email, replyTo: r.reply_to,
+  }
+}
+
+// Partial update of one account. Only the fields provided are written; a blank
+// password means "leave the stored one untouched". Passwords are re-encrypted.
+export interface AccountEdit {
+  label?: string
+  imapHost?: string; imapPort?: number; imapSecure?: boolean; imapUser?: string; imapPass?: string
+  smtpHost?: string; smtpPort?: number; smtpSecure?: boolean; smtpUser?: string; smtpPass?: string
+  fromEmail?: string; replyTo?: string
+}
+export async function updateAccount(userId: string, accountId: string, e: AccountEdit): Promise<void> {
+  const sets: string[] = []
+  const vals: unknown[] = []
+  const put = (col: string, v: unknown) => { sets.push(`${col} = $${sets.length + 1}`); vals.push(v) }
+  if (e.label !== undefined) put('label', e.label)
+  if (e.imapHost !== undefined) put('imap_host', e.imapHost)
+  if (e.imapPort !== undefined) put('imap_port', e.imapPort)
+  if (e.imapSecure !== undefined) put('imap_secure', e.imapSecure ? 1 : 0)
+  if (e.imapUser !== undefined) put('imap_user', e.imapUser)
+  if (e.imapPass) put('imap_pass', encryptSecret(e.imapPass))
+  if (e.smtpHost !== undefined) put('smtp_host', e.smtpHost)
+  if (e.smtpPort !== undefined) put('smtp_port', e.smtpPort)
+  if (e.smtpSecure !== undefined) put('smtp_secure', e.smtpSecure ? 1 : 0)
+  if (e.smtpUser !== undefined) put('smtp_user', e.smtpUser)
+  if (e.smtpPass) put('smtp_pass', encryptSecret(e.smtpPass))
+  if (e.fromEmail !== undefined) put('from_email', e.fromEmail)
+  if (e.replyTo !== undefined) put('reply_to', e.replyTo)
+  if (!sets.length) return
+  vals.push(accountId, userId)
+  await (await ready()).run(
+    `UPDATE accounts SET ${sets.join(', ')} WHERE id = $${vals.length - 1} AND user_id = $${vals.length}`, vals)
+}
+
 // Resolve the MailAccount (decrypted) for a user's chosen/default account.
 export async function resolveAccount(userId: string, accountId?: string): Promise<MailAccount | null> {
   const rows = await listAccounts(userId)
