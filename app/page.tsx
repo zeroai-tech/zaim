@@ -33,6 +33,8 @@ export default function Zaim() {
   const [showKeys, setShowKeys] = useState(false)
   const [avatar, setAvatar] = useState<string>('')
   const [showProfile, setShowProfile] = useState(false)
+  const [editAccount, setEditAccount] = useState<string | null>(null)
+  const [reloadTick, setReloadTick] = useState(0) // bump to re-discover folders + reload mail (e.g. after repointing a mailbox's server)
   const [panelState, setPanelState] = useState({ spaces: true, context: true, ai: false })
 
   const refreshMe = useCallback(async () => {
@@ -52,7 +54,7 @@ export default function Zaim() {
     if (phase !== 'app' || !activeAccount) return
     setFolders([{ key: 'INBOX', label: 'Inbox', icon: '📥', path: 'INBOX' }])
     api('/api/mail/folders' + q({ account: activeAccount })).then((r) => { if (r.ok) setFolders(r.folders) })
-  }, [phase, activeAccount])
+  }, [phase, activeAccount, reloadTick])
 
   const loadSeq = useRef(0)
   // Resolve to the mailbox *path* (a stable string), not the folders array itself —
@@ -166,6 +168,7 @@ export default function Zaim() {
         email={email} avatar={avatar}
         onSwitchAccount={(id) => { setActiveAccount(id); setActiveFolder('INBOX'); setSmartView(null) }}
         onAddAccount={() => setPhase('add-account')}
+        onEditAccount={(id) => setEditAccount(id)}
         search={search} onSearch={setSearch}
         onCompose={() => setCompose({ to: '', subject: '' })}
         onShowKeys={() => setShowKeys(true)} onShowProfile={() => setShowProfile(true)} onLogout={logout}
@@ -198,6 +201,10 @@ export default function Zaim() {
         </Collapsible>
       </div>
 
+      {editAccount && <EditAccount accountId={editAccount}
+        onClose={() => setEditAccount(null)}
+        onSaved={() => { setEditAccount(null); refreshMe(); setReloadTick((t) => t + 1) }}
+        onDeleted={() => { setEditAccount(null); refreshMe() }} />}
       {showKeys && <Keys accounts={accounts} onClose={() => setShowKeys(false)} />}
       {showProfile && <ProfileModal email={email} avatar={avatar} onClose={() => setShowProfile(false)} onSaved={(a) => setAvatar(a)} />}
     </div>
@@ -234,6 +241,92 @@ function AddAccount({ onDone, email, canCancel, onCancel }: { onDone: () => void
         {err && <p className="text-xs text-red-400 mt-2">{err}</p>}
         <button disabled={busy || !f.imapHost || !f.imapPass} onClick={go} className="accent-grad text-white font-bold rounded-xl py-3 w-full mt-4 hover:opacity-90 disabled:opacity-50">{busy ? 'Verifying…' : 'Connect'}</button>
         <p className="text-[11px] text-[color:var(--muted)] mt-3 text-center">SMTP is auto-derived from your host · sending uses the same account.</p>
+      </div>
+    </div>
+  )
+}
+
+// Edit a mailbox's server settings (the fix for a box that sends but no longer
+// receives — its IMAP host still points at the old server) or remove it. The
+// server verifies the new settings before saving, so a bad edit can't lock it.
+type EditForm = { label: string; imapHost: string; imapPort: string; imapSecure: boolean; imapUser: string; smtpHost: string; smtpPort: string; smtpSecure: boolean; smtpUser: string; pass: string }
+function EditAccount({ accountId, onClose, onSaved, onDeleted }: { accountId: string; onClose: () => void; onSaved: () => void; onDeleted: () => void }) {
+  const [f, setF] = useState<EditForm | null>(null)
+  const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [confirmDel, setConfirmDel] = useState(false)
+
+  useEffect(() => {
+    let live = true
+    api(`/api/accounts/${accountId}`).then((r) => {
+      if (!live) return
+      if (!r.ok || !r.account) { setErr(r.error || 'Could not load settings'); return }
+      const a = r.account
+      setF({ label: a.label || '', imapHost: a.imapHost || '', imapPort: String(a.imapPort || 993), imapSecure: a.imapSecure !== false, imapUser: a.imapUser || '', smtpHost: a.smtpHost || '', smtpPort: String(a.smtpPort || 465), smtpSecure: a.smtpSecure !== false, smtpUser: a.smtpUser || '', pass: '' })
+    })
+    return () => { live = false }
+  }, [accountId])
+
+  async function save() {
+    if (!f) return
+    setErr(''); setBusy(true)
+    const r = await api(`/api/accounts/${accountId}`, { method: 'PUT', body: JSON.stringify({
+      label: f.label, imapHost: f.imapHost, imapPort: Number(f.imapPort), imapSecure: f.imapSecure, imapUser: f.imapUser,
+      smtpHost: f.smtpHost, smtpPort: Number(f.smtpPort), smtpSecure: f.smtpSecure, smtpUser: f.smtpUser || f.imapUser,
+      imapPass: f.pass || undefined, smtpPass: f.pass || undefined,
+    }) })
+    setBusy(false)
+    if (r.ok) onSaved(); else setErr(r.error || 'Could not save — check the settings and password.')
+  }
+  async function del() {
+    setBusy(true)
+    const r = await api(`/api/accounts/${accountId}`, { method: 'DELETE' })
+    setBusy(false)
+    if (r.ok) onDeleted(); else setErr(r.error || 'Could not remove.')
+  }
+  const upd = (k: keyof EditForm) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setF((cur) => cur ? { ...cur, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value } : cur)
+  const bd = { borderColor: 'var(--line)' }
+
+  return (
+    <div className="fixed inset-0 z-40 grid place-items-center bg-black/50 px-4" onClick={onClose}>
+      <div className="glass rounded-2xl p-6 w-full max-w-md fade-in max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-4"><span className="font-extrabold text-lg tracking-tight">Mailbox settings</span><button onClick={onClose} className="ml-auto text-[color:var(--muted)] hover:text-white">✕</button></div>
+        {!f ? <p className="text-sm text-[color:var(--muted)] py-6 text-center">{err || 'Loading…'}</p> : (<>
+          <div className="flex flex-col gap-3">
+            <input className={field} style={bd} placeholder="Label" value={f.label} onChange={upd('label')} />
+            <input className={field} style={bd} placeholder="Email / username" value={f.imapUser} onChange={upd('imapUser')} />
+            <div>
+              <div className="text-[11px] font-semibold text-[color:var(--muted)] mb-1">Incoming — IMAP</div>
+              <div className="flex gap-2">
+                <input className={field + ' flex-[2]'} style={bd} placeholder="IMAP host" value={f.imapHost} onChange={upd('imapHost')} />
+                <input className={field + ' flex-[1]'} style={bd} placeholder="Port" value={f.imapPort} onChange={upd('imapPort')} />
+              </div>
+              <label className="flex items-center gap-2 text-[11px] text-[color:var(--muted)] mt-1.5"><input type="checkbox" checked={f.imapSecure} onChange={upd('imapSecure')} /> SSL/TLS (typically port 993)</label>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold text-[color:var(--muted)] mb-1">Outgoing — SMTP</div>
+              <div className="flex gap-2">
+                <input className={field + ' flex-[2]'} style={bd} placeholder="SMTP host" value={f.smtpHost} onChange={upd('smtpHost')} />
+                <input className={field + ' flex-[1]'} style={bd} placeholder="Port" value={f.smtpPort} onChange={upd('smtpPort')} />
+              </div>
+              <label className="flex items-center gap-2 text-[11px] text-[color:var(--muted)] mt-1.5"><input type="checkbox" checked={f.smtpSecure} onChange={upd('smtpSecure')} /> SSL/TLS (typically port 465)</label>
+            </div>
+            <input className={field} style={bd} type="password" placeholder="New password (leave blank to keep current)" value={f.pass} onChange={upd('pass')} />
+          </div>
+          {err && <p className="text-xs text-red-400 mt-2">{err}</p>}
+          <button disabled={busy || !f.imapHost} onClick={save} className="accent-grad text-white font-bold rounded-xl py-3 w-full mt-4 hover:opacity-90 disabled:opacity-50">{busy ? 'Verifying…' : 'Save & verify'}</button>
+          <p className="text-[11px] text-[color:var(--muted)] mt-2 text-center">The incoming server is tested before saving, so a wrong setting can’t lock you out.</p>
+          <div className="mt-4 pt-3" style={{ borderTop: '1px solid var(--line)' }}>
+            {!confirmDel ? (
+              <button onClick={() => setConfirmDel(true)} className="text-xs text-red-400 hover:text-red-300">Remove this mailbox from Zaim</button>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[color:var(--muted)] flex-1">Remove it? Your mail stays on the server.</span>
+                <button disabled={busy} onClick={del} className="text-xs font-semibold text-red-400 hover:text-red-300">Yes, remove</button>
+                <button onClick={() => setConfirmDel(false)} className="text-xs text-[color:var(--muted)]">Cancel</button>
+              </div>
+            )}
+          </div>
+        </>)}
       </div>
     </div>
   )
