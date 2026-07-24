@@ -1,10 +1,4 @@
-name: Build desktop installers
-
-# Builds the Zaim desktop app natively on macOS, Windows and Linux — so the native
-# SQLite module is compiled/verified for each platform (it can't be cross-compiled
-# from a Mac) — then publishes the installers to the `desktop-latest` release.
-#
-# Run from the Actions tab, or push a v* tag. Uses the built-in token — no secrets.
+name: Build native desktop apps
 
 on:
   workflow_dispatch:
@@ -21,14 +15,13 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: desktop-latest
-          name: Zaim — desktop app
+          name: Zaim — Native Desktop App
           prerelease: true
           body: |
-            Installers for **Zaim**, the secure mail client (webapp + CLI + agent API).
-            - macOS: `.dmg` (Apple Silicon + Intel)
+            Native installers for **Zaim** (Go + WebKit wrapper).
+            - macOS: `.dmg` or `.zip`
             - Windows: `.zip`
-            - Linux: `.AppImage`
-            Built natively per-OS so the encrypted SQLite vault runs everywhere.
+            - Linux: `.tar.gz`
 
   build:
     needs: create-release
@@ -36,24 +29,75 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-14,       flags: --mac --arm64 }   # Apple Silicon
-          - { os: macos-13,       flags: --mac --x64 }     # Intel
-          - { os: windows-latest, flags: --win }
-          - { os: ubuntu-latest,  flags: --linux }
+          - { os: macos-14,       target: macos-arm64, node_arch: darwin-arm64 }
+          - { os: macos-13,       target: macos-x64,   node_arch: darwin-x64 }
+          - { os: windows-latest, target: windows-x64, node_arch: win-x64 }
+          - { os: ubuntu-latest,  target: linux-x64,   node_arch: linux-x64 }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      
       - uses: actions/setup-node@v4
         with: { node-version: '20', cache: npm }
+        
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.22' }
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.0-dev
+
+      - name: Install MSYS2 (Windows)
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: mingw-w64-x86_64-gcc
+
       - run: npm ci
-      - run: npm run build           # next build (standalone)
-      - run: node electron/stage.cjs # stage static/public + drop native from standalone
-      - run: npx electron-builder ${{ matrix.flags }} --publish never
+      - run: npm run build
+
+      - name: Package App (Mac/Linux)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p release/Zaim
+          # Download bundled Node
+          curl -fsSL https://nodejs.org/dist/v20.11.0/node-v20.11.0-${{ matrix.node_arch }}.tar.gz | tar -xz -C release/Zaim --strip-components=1 node-v20.11.0-${{ matrix.node_arch }}/bin/node
+          
+          # Copy standalone next.js server
+          cp -r .next/standalone release/Zaim/standalone
+          cp -r .next/static release/Zaim/standalone/.next/static
+          cp -r public release/Zaim/standalone/public
+          
+          # Build Go wrapper
+          cd native
+          go build -o ../release/Zaim/Zaim main.go
+          cd ..
+          
+          # Zip it
+          cd release
+          zip -r Zaim-${{ matrix.target }}.zip Zaim
+
+      - name: Package App (Windows)
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          mkdir -p release/Zaim/bin
+          curl -fsSL -o release/Zaim/bin/node.exe https://nodejs.org/dist/v20.11.0/node-v20.11.0-win-x64/node.exe
+          
+          cp -r .next/standalone release/Zaim/standalone
+          cp -r .next/static release/Zaim/standalone/.next/static
+          cp -r public release/Zaim/standalone/public
+          
+          cd native
+          go build -ldflags "-H=windowsgui" -o ../release/Zaim/Zaim.exe main.go
+          cd ..
+          
+          cd release
+          zip -r Zaim-windows-x64.zip Zaim
+
       - name: Publish installers
         uses: softprops/action-gh-release@v2
         with:
           tag_name: desktop-latest
-          files: |
-            release/*.dmg
-            release/*.zip
-            release/*.AppImage
+          files: release/*.zip

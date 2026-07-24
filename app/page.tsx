@@ -15,7 +15,7 @@ import { Landing } from './components/Landing'
 
 export default function Zaim() {
   const [phase, setPhase] = useState<'loading' | 'auth' | 'add-account' | 'app'>('loading')
-  const [authMode, setAuthMode] = useState<null | 'login' | 'register'>(null)
+  const [authMode, setAuthMode] = useState<null | 'login' | 'register'>('login')
   const [email, setEmail] = useState('')
   const [accounts, setAccounts] = useState<Account[]>([])
   const [activeAccount, setActiveAccount] = useState('')
