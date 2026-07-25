@@ -13,8 +13,9 @@ export async function GET(req: Request) {
   const mailbox = url.searchParams.get('mailbox') || 'INBOX'
   const flaggedOnly = url.searchParams.get('flagged') === '1'
   const limit = Math.min(100, parseInt(url.searchParams.get('limit') || '40', 10))
+  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10))
   try {
-    return json({ ok: true, mailbox, messages: await listMailbox(r.ctx.account, mailbox, limit, { flaggedOnly }) })
+    return json({ ok: true, mailbox, messages: await listMailbox(r.ctx.account, mailbox, limit, { flaggedOnly, page }) })
   } catch (e) {
     return json({ ok: false, error: (e as Error).message }, 502)
   }

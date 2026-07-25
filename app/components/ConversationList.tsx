@@ -3,9 +3,11 @@ import { Msg, Avatar, emailOf, when } from '@/lib/client-utils'
 
 export function ConversationList({
   messages, activeFolder, selUid, listLoading, folderTitle, onOpen, onRefresh, onDelete, deleting,
+  hasMore, loadingMore, onLoadMore
 }: {
   messages: Msg[]; activeFolder: string; selUid: number | null; listLoading: boolean; folderTitle: string
   onOpen: (uid: number) => void; onRefresh: () => void; onDelete: (uid: number) => void; deleting: boolean
+  hasMore?: boolean; loadingMore?: boolean; onLoadMore?: () => void
 }) {
   const isSentLike = activeFolder === 'sent' || activeFolder === 'drafts'
   const trashLabel = activeFolder === 'trash' ? 'Delete permanently' : 'Move to Trash'
@@ -16,7 +18,7 @@ export function ConversationList({
         <h1 className="font-bold text-sm">{folderTitle}</h1>
         <button onClick={onRefresh} className="text-xs text-[color:var(--muted)] hover:text-white">↻ Refresh</button>
       </header>
-      <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1.5">
+      <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1.5 pb-8">
         {listLoading && <div className="p-4 text-sm text-[color:var(--muted)]">Loading…</div>}
         {!listLoading && messages.length === 0 && <div className="p-4 text-sm text-[color:var(--muted)]">Nothing here.</div>}
         {!listLoading && messages.map((m) => {
@@ -55,6 +57,15 @@ export function ConversationList({
             </div>
           )
         })}
+        {hasMore && !listLoading && (
+          <button
+            onClick={onLoadMore}
+            disabled={loadingMore}
+            className="mt-2 w-full py-2.5 text-sm font-medium text-[color:var(--muted)] hover:text-white hover:bg-white/[0.035] rounded-xl transition disabled:opacity-50"
+          >
+            {loadingMore ? 'Loading older messages...' : 'Load older messages'}
+          </button>
+        )}
       </div>
     </div>
   )
