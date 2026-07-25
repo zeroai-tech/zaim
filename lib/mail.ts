@@ -76,18 +76,26 @@ export async function listFolders(account: MailAccount): Promise<FolderInfo[]> {
   })
 }
 
-export async function listMailbox(account: MailAccount, mailbox = "INBOX", limit = 40, opts?: { flaggedOnly?: boolean }): Promise<MailSummary[]> {
+export async function listMailbox(account: MailAccount, mailbox = "INBOX", limit = 40, opts?: { flaggedOnly?: boolean, page?: number }): Promise<MailSummary[]> {
   return withImap(account, async (c) => {
     const lock = await c.getMailboxLock(mailbox)
     try {
       const total = (c.mailbox && typeof c.mailbox === 'object' ? c.mailbox.exists : 0) || 0
       if (!total) return []
       const out: MailSummary[] = []
+      const page = opts?.page || 1
+      
       // Starred: search this mailbox for flagged messages, newest `limit`.
       if (opts?.flaggedOnly) {
         const uids = (await c.search({ flagged: true }, { uid: true })) || []
         if (!uids.length) return []
-        const pick = uids.slice(-limit)
+        
+        const end = uids.length - (page - 1) * limit
+        if (end <= 0) return []
+        const start = Math.max(0, end - limit)
+        const pick = uids.slice(start, end)
+        if (!pick.length) return []
+        
         for await (const m of c.fetch(pick, { uid: true, envelope: true, flags: true }, { uid: true })) {
           const env = m.envelope
           out.push({
@@ -99,8 +107,12 @@ export async function listMailbox(account: MailAccount, mailbox = "INBOX", limit
         }
         return out.reverse()
       }
-      const start = Math.max(1, total - limit + 1)
-      for await (const m of c.fetch(`${start}:*`, { uid: true, envelope: true, flags: true })) {
+      
+      const end = total - (page - 1) * limit
+      if (end < 1) return []
+      const start = Math.max(1, end - limit + 1)
+      
+      for await (const m of c.fetch(`${start}:${end}`, { uid: true, envelope: true, flags: true })) {
         const env = m.envelope
         out.push({
           uid: m.uid,

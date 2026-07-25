@@ -56,26 +56,45 @@ export default function Zaim() {
     api('/api/mail/folders' + q({ account: activeAccount })).then((r) => { if (r.ok) setFolders(r.folders) })
   }, [phase, activeAccount, reloadTick])
 
+  const [page, setPage] = useState(1)
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const loadSeq = useRef(0)
+  
   // Resolve to the mailbox *path* (a stable string), not the folders array itself —
   // once the real folder list arrives it's a new array reference even when the
   // path for the active folder hasn't changed, which used to re-trigger a fully
   // redundant duplicate fetch of the same list right after the first one ran.
   const activeMailbox = folders.find((x) => x.key === activeFolder)?.path || 'INBOX'
-  const load = useCallback(() => {
+  const load = useCallback((isLoadMore = false) => {
     if (!activeAccount) return
-    // Tag each request with a sequence number so an older, still-in-flight
-    // request can't clobber a newer one that already resolved — without this,
-    // switching folders (or reloading after a send) while a prior fetch is
-    // still pending could let stale data (e.g. a Drafts list) overwrite the
-    // list for the folder you're actually looking at now.
     const seq = ++loadSeq.current
-    setListLoading(true); setSel(null); setSelUid(null)
-    api('/api/mail/list' + q({ limit: '40', mailbox: activeMailbox, flagged: activeFolder === 'starred' ? '1' : undefined, account: activeAccount }))
-      .then((r) => { if (seq === loadSeq.current) setMessages(r.messages || []) })
-      .finally(() => { if (seq === loadSeq.current) setListLoading(false) })
-  }, [activeAccount, activeFolder, activeMailbox])
-  useEffect(() => { if (phase === 'app') load() }, [phase, load])
+    if (!isLoadMore) {
+      setListLoading(true); setSel(null); setSelUid(null)
+    } else {
+      setLoadingMore(true)
+    }
+    
+    const targetPage = isLoadMore ? page + 1 : 1
+    api('/api/mail/list' + q({ limit: '40', page: String(targetPage), mailbox: activeMailbox, flagged: activeFolder === 'starred' ? '1' : undefined, account: activeAccount }))
+      .then((r) => { 
+        if (seq === loadSeq.current) {
+          const newMsgs = r.messages || []
+          setMessages(isLoadMore ? (prev) => [...prev, ...newMsgs] : newMsgs)
+          setHasMore(newMsgs.length === 40)
+          if (isLoadMore) setPage(targetPage)
+          else setPage(1)
+        }
+      })
+      .finally(() => { 
+        if (seq === loadSeq.current) {
+          setListLoading(false)
+          setLoadingMore(false)
+        }
+      })
+  }, [activeAccount, activeFolder, activeMailbox, page])
+  
+  useEffect(() => { if (phase === 'app') load() }, [phase, activeAccount, activeFolder, activeMailbox])
 
   async function open(uid: number) {
     setSelUid(uid); setSel(null)
@@ -180,7 +199,20 @@ export default function Zaim() {
         </Collapsible>
 
         <div className="w-[360px] shrink-0 h-full" style={{ borderRight: '1px solid var(--line)' }}>
-          <ConversationList messages={visibleMessages} activeFolder={activeFolder} selUid={selUid} listLoading={listLoading} folderTitle={folderTitle} onOpen={open} onRefresh={load} onDelete={deleteMail} deleting={deleting} />
+          <ConversationList
+            messages={visibleMessages}
+            activeFolder={activeFolder}
+            selUid={selUid}
+            listLoading={listLoading}
+            folderTitle={folderTitle}
+            onOpen={open}
+            onRefresh={() => load(false)}
+            onDelete={deleteMail}
+            deleting={deleting}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            onLoadMore={() => load(true)}
+          />
         </div>
 
         <div className="flex-1 min-w-0 h-full" style={{ borderRight: '1px solid var(--line)' }}>
