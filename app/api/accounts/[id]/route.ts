@@ -1,5 +1,6 @@
 import { json } from '@/lib/auth'
 import { userIdFromReq } from '@/lib/session'
+import { mailboxFromReq, MAILBOX_ACCOUNT_ID } from '@/lib/mailbox-session'
 import { setDefault, deleteAccount, getAccount, updateAccount, resolveAccount } from '@/lib/store'
 import { verify } from '@/lib/mail'
 import type { MailAccount } from '@/lib/config'
@@ -10,9 +11,20 @@ export const maxDuration = 30 // PUT verifies IMAP+SMTP before saving
 
 // Current settings to pre-fill the edit form (no passwords ever returned).
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params
+  // The signed-in mailbox isn't a stored row — its settings come from the mail
+  // server itself, so they're shown but not editable here.
+  const mb = mailboxFromReq(req)
+  if (id === MAILBOX_ACCOUNT_ID && mb) {
+    return json({ ok: true, managed: true, account: {
+      id: MAILBOX_ACCOUNT_ID, label: mb.label || 'ZeroAI Mail',
+      imapHost: mb.imapHost, imapPort: mb.imapPort, imapSecure: mb.imapSecure, imapUser: mb.email,
+      smtpHost: mb.smtpHost, smtpPort: mb.smtpPort, smtpSecure: mb.smtpSecure, smtpUser: mb.email,
+      fromEmail: mb.email, replyTo: mb.email,
+    } })
+  }
   const uid = userIdFromReq(req)
   if (!uid) return json({ error: 'Unauthorized' }, 401)
-  const { id } = await ctx.params
   const account = await getAccount(uid, id)
   if (!account) return json({ error: 'Not found' }, 404)
   return json({ ok: true, account })
@@ -22,9 +34,10 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
 // an old server (mail sends but nothing arrives). We VERIFY the new settings
 // against the live server before saving, so a bad edit can't lock the box.
 export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params
+  if (id === MAILBOX_ACCOUNT_ID) return json({ error: 'This mailbox lives on your mail server — change it there, or sign in as a different mailbox.' }, 400)
   const uid = userIdFromReq(req)
   if (!uid) return json({ error: 'Unauthorized' }, 401)
-  const { id } = await ctx.params
   const cur = await resolveAccount(uid, id)
   if (!cur) return json({ error: 'Not found' }, 404)
 
@@ -56,17 +69,19 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
 }
 
 export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params
+  if (id === MAILBOX_ACCOUNT_ID) return json({ error: 'This mailbox lives on your mail server — change it there, or sign in as a different mailbox.' }, 400)
   const uid = userIdFromReq(req)
   if (!uid) return json({ error: 'Unauthorized' }, 401)
-  const { id } = await ctx.params
   await setDefault(uid, id)
   return json({ ok: true })
 }
 
 export async function DELETE(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const { id } = await ctx.params
+  if (id === MAILBOX_ACCOUNT_ID) return json({ error: 'This mailbox lives on your mail server — change it there, or sign in as a different mailbox.' }, 400)
   const uid = userIdFromReq(req)
   if (!uid) return json({ error: 'Unauthorized' }, 401)
-  const { id } = await ctx.params
   await deleteAccount(uid, id)
   return json({ ok: true })
 }

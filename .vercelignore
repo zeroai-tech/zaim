@@ -1,0 +1,14 @@
+# The desktop build's installers — ~1GB of Electron output that has no place in
+# a serverless deploy (and pushes the upload past Vercel's 100MB limit).
+release/
+build/
+electron/
+native/
+zaim-backend/
+node_modules/
+.next/
+*.log
+*.tsbuildinfo
+*.map
+graphify-out/
+zaim.db*

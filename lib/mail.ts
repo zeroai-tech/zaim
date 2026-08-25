@@ -36,16 +36,22 @@ export interface MailFull extends MailSummary {
 // TOO fast: 8s greeting turned out to be tighter than this account's real
 // mail host needs under normal (non-stalled) conditions, so every call
 // started failing outright instead of just the genuinely-stuck ones.
-async function withImap<T>(account: MailAccount, fn: (c: ImapFlow) => Promise<T>): Promise<T> {
+interface ImapTimeouts { connectionTimeout: number; greetingTimeout: number; socketTimeout: number }
+const DEFAULT_TIMEOUTS: ImapTimeouts = { connectionTimeout: 20_000, greetingTimeout: 15_000, socketTimeout: 30_000 }
+
+async function withImap<T>(account: MailAccount, fn: (c: ImapFlow) => Promise<T>, timeouts: ImapTimeouts = DEFAULT_TIMEOUTS): Promise<T> {
   const { imap } = account
   const client = new ImapFlow({
     host: imap.host, port: imap.port, secure: imap.secure,
     auth: { user: imap.user, pass: imap.pass },
     logger: false,
-    connectionTimeout: 20_000,
-    greetingTimeout: 15_000,
-    socketTimeout: 30_000,
+    ...timeouts,
   })
+  // A timed-out or reset connection emits 'error' on the client, and an ImapFlow
+  // client with no 'error' listener re-throws it as an uncaughtException — which
+  // lands outside this promise and takes the whole process down rather than
+  // failing just this call. Swallow it here; connect()/fn() still reject.
+  client.on('error', () => {})
   await client.connect()
   try { return await fn(client) } finally { await client.logout().catch(() => {}) }
 }
@@ -179,7 +185,7 @@ export interface SendInput { to: string; subject: string; html?: string; text?: 
 
 // Build the full raw MIME once, so the exact same bytes we send can also be
 // saved to the Sent folder.
-function buildRaw(account: MailAccount, input: SendInput): Promise<Buffer> {
+export function buildRaw(account: MailAccount, input: SendInput): Promise<Buffer> {
   const { from, replyTo } = account
   const mc = new MailComposer({
     from: `"${from.name}" <${from.email}>`,
@@ -322,4 +328,26 @@ export async function verify(account: MailAccount): Promise<{ imap: boolean; smt
     await t.verify(); res.smtp = true
   } catch (e) { res.error = (res.error ? res.error + ' | ' : '') + 'SMTP: ' + (e as Error).message }
   return res
+}
+
+// Sign-in check: can these credentials actually open this mailbox? Only IMAP is
+// tried — SMTP is a separate service that can be down or relayed elsewhere, and
+// failing sign-in over it would lock people out of reading their own mail.
+export interface ImapProbe { ok: boolean; authFailed: boolean; error?: string }
+// Sign-in runs against several candidate hosts in turn, so a wrong guess has to
+// give up quickly — the defaults above would stack into a request that outlives
+// the serverless function's own budget and 504s.
+const SIGNIN_TIMEOUTS: ImapTimeouts = { connectionTimeout: 7_000, greetingTimeout: 6_000, socketTimeout: 10_000 }
+
+export async function probeImap(account: MailAccount): Promise<ImapProbe> {
+  try {
+    await withImap(account, async () => {}, SIGNIN_TIMEOUTS)
+    return { ok: true, authFailed: false }
+  } catch (e) {
+    // imapflow reports a rejected login as the generic "Command failed"; the
+    // usable signal is the authenticationFailed flag and the server's own
+    // response text, so read those rather than pattern-matching the message.
+    const err = e as Error & { authenticationFailed?: boolean; responseText?: string }
+    return { ok: false, authFailed: !!err.authenticationFailed, error: err.responseText || err.message }
+  }
 }

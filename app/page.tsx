@@ -15,7 +15,7 @@ import { Landing } from './components/Landing'
 
 export default function Zaim() {
   const [phase, setPhase] = useState<'loading' | 'auth' | 'add-account' | 'app'>('loading')
-  const [authMode, setAuthMode] = useState<null | 'login' | 'register'>('login')
+  const [authOpen, setAuthOpen] = useState(true)
   const [email, setEmail] = useState('')
   const [accounts, setAccounts] = useState<Account[]>([])
   const [activeAccount, setActiveAccount] = useState('')
@@ -164,7 +164,7 @@ export default function Zaim() {
   function selectFolder(key: string) { setSearch(''); setActiveFolder(key) }
 
   if (phase === 'loading') return <Splash />
-  if (phase === 'auth') return <Landing onSignIn={() => setAuthMode('login')} onStart={() => setAuthMode('register')} authMode={authMode} closeAuth={() => setAuthMode(null)} onDone={refreshMe} />
+  if (phase === 'auth') return <Landing onSignIn={() => setAuthOpen(true)} onStart={() => setAuthOpen(true)} authOpen={authOpen} closeAuth={() => setAuthOpen(false)} onDone={refreshMe} />
   if (phase === 'add-account') return <AddAccount onDone={refreshMe} email={email} canCancel={accounts.length > 0} onCancel={() => setPhase('app')} />
 
   const active = accounts.find((a) => a.id === activeAccount)

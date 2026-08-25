@@ -203,7 +203,7 @@ function Floor2() {
   )
 }
 
-export function Landing({ onSignIn, onStart, authMode, closeAuth, onDone }: { onSignIn: () => void; onStart: () => void; authMode: null | 'login' | 'register'; closeAuth: () => void; onDone: () => void }) {
+export function Landing({ onSignIn, onStart, authOpen, closeAuth, onDone }: { onSignIn: () => void; onStart: () => void; authOpen: boolean; closeAuth: () => void; onDone: () => void }) {
   const [introDone, setIntroDone] = useState(false)
   if (!introDone) return <Intro onDone={() => setIntroDone(true)} />
 
@@ -215,7 +215,7 @@ export function Landing({ onSignIn, onStart, authMode, closeAuth, onDone }: { on
           <a href="#download" className="hidden sm:block text-sm text-[color:var(--muted)] hover:text-white px-3 py-2">Download</a>
           <a href="#agents" className="hidden sm:block text-sm text-[color:var(--muted)] hover:text-white px-3 py-2">For agents</a>
           <button onClick={onSignIn} className="text-sm font-semibold px-3 py-2 rounded-lg hover:bg-white/5">Sign in</button>
-          <button onClick={onStart} className="accent-grad text-white text-sm font-bold px-4 py-2 rounded-lg hover:opacity-90">Get started</button>
+          <button onClick={onStart} className="accent-grad text-white text-sm font-bold px-4 py-2 rounded-lg hover:opacity-90">Open my inbox</button>
         </div>
       </nav>
 
@@ -232,10 +232,10 @@ export function Landing({ onSignIn, onStart, authMode, closeAuth, onDone }: { on
             Zaim is a beautiful, private mail client that companies self-host like Outlook — plus an API and CLI so Claude Code, Codex and Gemini can read, draft and send your mail. Your inbox, your rules, your keys.
           </p>
           <div className="flex flex-wrap items-center gap-3 mt-8">
-            <button onClick={onStart} className="accent-grad text-white font-bold px-6 py-3 rounded-xl hover:opacity-90 text-sm">Get started free</button>
+            <button onClick={onStart} className="accent-grad text-white font-bold px-6 py-3 rounded-xl hover:opacity-90 text-sm">Open my inbox</button>
             <a href="#floor-1" className="font-semibold px-6 py-3 rounded-xl text-sm hover:bg-white/5" style={{ border: '1px solid var(--line)' }}>See it think ↓</a>
           </div>
-          <p className="text-xs mt-4" style={{ color: 'var(--muted)' }}>No credit card · Bring your own mailbox · Passwords encrypted at rest</p>
+          <p className="text-xs mt-4" style={{ color: 'var(--muted)' }}>No sign-up · Your mailbox password is the only password · Credentials never stored in a database</p>
         </div>
         <HeroVisual />
       </header>
@@ -300,7 +300,7 @@ zaim send --to ceo@acme.com \\
           <a href={`${REL}/Zaim-0.1.0.AppImage`} className="font-semibold px-5 py-3 rounded-xl text-sm hover:bg-white/5" style={{ border: '1px solid var(--line)' }}>🐧 Linux</a>
         </div>
         <div className="mt-12">
-          <button onClick={onStart} className="accent-grad text-white font-bold px-7 py-3 rounded-xl hover:opacity-90 text-sm">Start using Zaim in your browser →</button>
+          <button onClick={onStart} className="accent-grad text-white font-bold px-7 py-3 rounded-xl hover:opacity-90 text-sm">Open Zaim in your browser →</button>
         </div>
       </section>
 
@@ -314,37 +314,35 @@ zaim send --to ceo@acme.com \\
         </span>
       </footer>
 
-      {authMode && <AuthModal mode={authMode} onClose={closeAuth} onDone={onDone} />}
+      {authOpen && <AuthModal onClose={closeAuth} onDone={onDone} />}
     </div>
   )
 }
 
-function AuthModal({ mode: initial, onClose, onDone }: { mode: 'login' | 'register'; onClose: () => void; onDone: () => void }) {
-  const [mode, setMode] = useState<'login' | 'register'>(initial)
+function AuthModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [email, setEmail] = useState(''); const [pw, setPw] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false)
-  // When the signup domain isn't one we host, we ask for + verify the user's own
-  // mail server so a non-existent mailbox can't create an account.
+  // Only shown if we genuinely can't work out where this address's mail lives —
+  // never for a mailbox on our own server.
   const [needsServer, setNeedsServer] = useState(false)
   const [imapHost, setImapHost] = useState(''); const [imapPort, setImapPort] = useState('993')
   const [smtpHost, setSmtpHost] = useState(''); const [smtpPort, setSmtpPort] = useState('465')
+
   async function go() {
     setErr('')
     const em = email.trim().toLowerCase()
-    if (mode === 'register') {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) return setErr('Please enter a valid email address.')
-      if (pw.length < 8) return setErr('Password must be at least 8 characters.')
-      if (needsServer && !imapHost.trim()) return setErr('Enter your incoming (IMAP) mail server.')
-    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) return setErr('Please enter a valid email address.')
+    if (!pw) return setErr('Please enter your mailbox password.')
+    if (needsServer && !imapHost.trim()) return setErr('Enter your incoming (IMAP) mail server.')
     setBusy(true)
     const payload: Record<string, unknown> = { email: em, password: pw }
-    if (mode === 'register' && needsServer)
+    if (needsServer)
       Object.assign(payload, { imapHost: imapHost.trim(), imapPort: +imapPort || 993, smtpHost: smtpHost.trim() || undefined, smtpPort: +smtpPort || 465 })
-    const r = await api(`/api/auth/${mode}`, { method: 'POST', body: JSON.stringify(payload) })
+    const r = await api('/api/auth/login', { method: 'POST', body: JSON.stringify(payload) })
     if (r.ok) { setBusy(false); return onDone() }
-    // Domain isn't hosted by us → collect the user's mail server and try again.
     if (r.needsMailServer) { setBusy(false); setNeedsServer(true); setErr(r.error || 'Enter your mail server details to continue.'); return }
-    // May have actually succeeded (slow cold-start) — server sets the cookie on
-    // success; re-check before showing an error so a completed signup isn't a false fail.
+    // A slow cold start can time the response out after the cookie was already
+    // set — re-check before showing a failure so a real sign-in isn't reported
+    // as a wrong password.
     const me = await api('/api/auth/me')
     setBusy(false)
     if (me?.user) return onDone()
@@ -355,12 +353,12 @@ function AuthModal({ mode: initial, onClose, onDone }: { mode: 'login' | 'regist
     <div className="fixed inset-0 grid place-items-center bg-black/60 backdrop-blur-sm z-50 p-6" onClick={onClose}>
       <div className="glass rounded-2xl p-8 w-full max-w-sm fade-in" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 mb-6"><Mark /><span className="font-extrabold text-lg tracking-tight">Zaim</span><button onClick={onClose} className="ml-auto text-[color:var(--muted)] hover:text-white">✕</button></div>
-        <h1 className="text-xl font-bold">{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1>
-        <p className="text-sm text-[color:var(--muted)] mt-1 mb-5">{mode === 'register' ? 'Sign in with your real mailbox — we verify it exists.' : 'Secure mail for you and your agents.'}</p>
+        <h1 className="text-xl font-bold">Sign in to your mailbox</h1>
+        <p className="text-sm text-[color:var(--muted)] mt-1 mb-5">Use your email address and its password — the same ones your mail server already knows. There is nothing to sign up for.</p>
         <div className="flex flex-col gap-3">
-          <input className={field} style={smallField} placeholder="you@company.com" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input className={field} style={smallField} type="password" placeholder={mode === 'register' ? 'mailbox password (8+ chars)' : 'password'} value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !needsServer && go()} />
-          {mode === 'register' && needsServer && (
+          <input className={field} style={smallField} placeholder="you@yourdomain.com" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !busy && go()} />
+          <input className={field} style={smallField} type="password" placeholder="mailbox password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !busy && !needsServer && go()} />
+          {needsServer && (
             <div className="flex flex-col gap-2 pt-1 fade-in">
               <p className="text-xs" style={{ color: 'var(--muted)' }}>Your mail server (from your email provider):</p>
               <div className="flex gap-2">
@@ -375,10 +373,10 @@ function AuthModal({ mode: initial, onClose, onDone }: { mode: 'login' | 'regist
           )}
         </div>
         {err && <p className="text-xs text-red-400 mt-2">{err}</p>}
-        <button disabled={busy} onClick={go} className="accent-grad text-white font-bold rounded-xl py-3 w-full mt-4 hover:opacity-90 disabled:opacity-50">{busy ? '…' : mode === 'login' ? 'Sign in' : needsServer ? 'Verify & create' : 'Create account'}</button>
-        <button onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setErr(''); setNeedsServer(false) }} className="text-xs text-[color:var(--muted)] hover:text-white mt-4 w-full text-center">
-          {mode === 'login' ? "No account? Create one" : 'Have an account? Sign in'}
-        </button>
+        <button disabled={busy} onClick={go} className="accent-grad text-white font-bold rounded-xl py-3 w-full mt-4 hover:opacity-90 disabled:opacity-50">{busy ? 'Checking your mailbox…' : 'Sign in'}</button>
+        <p className="text-[11px] text-[color:var(--muted)] mt-4 text-center leading-relaxed">
+          Forgot your password? Your mail administrator can reset it for you.
+        </p>
       </div>
     </div>
   )

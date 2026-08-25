@@ -1,5 +1,5 @@
 import { json } from '@/lib/auth'
-import { userIdFromReq } from '@/lib/session'
+import { ensureUserId, withLink } from '@/lib/link-user'
 import { setUserAvatar } from '@/lib/store'
 
 export const runtime = 'nodejs'
@@ -12,7 +12,7 @@ const MAX = 300 * 1024
 // user's profile picture. Shown next to their name inside Zaim (and reused as
 // the sender avatar on mail they send from this client).
 export async function POST(req: Request) {
-  const uid = userIdFromReq(req)
+  const { uid, setCookie } = await ensureUserId(req)
   if (!uid) return json({ error: 'Not signed in' }, 401)
   let body: { avatar?: string | null }
   try { body = await req.json() } catch { return json({ error: 'Invalid body' }, 400) }
@@ -24,5 +24,5 @@ export async function POST(req: Request) {
     if (avatar.length > MAX) return json({ error: 'Image too large — pick a smaller one' }, 400)
   }
   await setUserAvatar(uid, avatar ?? null)
-  return json({ ok: true, avatar: avatar ?? null })
+  return withLink(json({ ok: true, avatar: avatar ?? null }), { uid, setCookie })
 }

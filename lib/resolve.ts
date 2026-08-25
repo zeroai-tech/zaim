@@ -3,21 +3,36 @@ import { getAccount, isConfigured, type MailAccount } from './config'
 import { apiKey } from './auth'
 import { userIdFromReq } from './session'
 import { resolveAccount, findByApiKey } from './store'
+import { mailboxFromReq, toAccount, MAILBOX_ACCOUNT_ID } from './mailbox-session'
 
 // Resolve which mail account a request acts on:
-//   · a logged-in web user → their chosen/default vault account (multi-tenant)
-//   · an agent/CLI with the API key → the server's env single-account
+//   · a signed-in mailbox → its credentials straight out of the sealed cookie
+//     (no database read at all — see lib/mailbox-session.ts)
+//   · that person's saved third-party mailboxes → the vault, when one is picked
+//   · an agent/CLI with an API key → the key's mailbox, or the env single-account
 // This is the one place account selection lives, so the mail routes stay simple.
 export type Resolved = { account: MailAccount; userId: string | null }
 
 export async function resolveForRequest(req: Request): Promise<{ ok: true; ctx: Resolved } | { ok: false; status: number; error: string }> {
   const uid = userIdFromReq(req)
-  if (uid) {
-    const accountId = new URL(req.url).searchParams.get('account') || undefined
-    const account = await resolveAccount(uid, accountId)
-    if (!account) return { ok: false, status: 409, error: 'No mail account yet — add one first.' }
-    return { ok: true, ctx: { account, userId: uid } }
+  const wanted = new URL(req.url).searchParams.get('account') || undefined
+  const mb = mailboxFromReq(req)
+
+  // The signed-in mailbox, unless the request explicitly asked for a different
+  // saved account (the switcher passes its id).
+  if (mb && (!wanted || wanted === MAILBOX_ACCOUNT_ID)) {
+    return { ok: true, ctx: { account: toAccount(mb), userId: uid } }
   }
+
+  if (uid) {
+    const account = await resolveAccount(uid, wanted === MAILBOX_ACCOUNT_ID ? undefined : wanted)
+    if (account) return { ok: true, ctx: { account, userId: uid } }
+    // A stale account id shouldn't strand someone who is otherwise signed in.
+    if (mb) return { ok: true, ctx: { account: toAccount(mb), userId: uid } }
+    return { ok: false, status: 409, error: 'No mail account yet — add one first.' }
+  }
+  if (mb) return { ok: true, ctx: { account: toAccount(mb), userId: null } }
+
   // Agent / CLI: an API key in the Bearer header (or zaim_key cookie).
   const auth = req.headers.get('authorization') || ''
   const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : ''

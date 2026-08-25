@@ -3,6 +3,7 @@ import { apiKey, json } from '@/lib/auth'
 import { isConfigured } from '@/lib/config'
 import { userIdFromReq } from '@/lib/session'
 import { resolveAccount, findByApiKey } from '@/lib/store'
+import { mailboxFromReq } from '@/lib/mailbox-session'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -12,6 +13,10 @@ export const dynamic = 'force-dynamic'
 // missing mailbox means `configured: false` rather than failing the request —
 // this endpoint's whole job is to report that distinction, not enforce it.
 export async function GET(req: Request) {
+  // A signed-in mailbox is authenticated and configured by definition — its
+  // credentials were verified against IMAP and travel in the sealed cookie.
+  if (mailboxFromReq(req)) return json({ authed: true, configured: true })
+
   const uid = userIdFromReq(req)
   if (uid) {
     const account = await resolveAccount(uid)
