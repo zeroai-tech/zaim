@@ -320,7 +320,16 @@ zaim send --to ceo@acme.com \\
 }
 
 function AuthModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  const [email, setEmail] = useState(''); const [pw, setPw] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false)
+  // ZaiPanel links here as `?email=someone@domain` when an admin opens a mailbox
+  // — Zaim is that server's mail client, the way cPanel opens RoundCube. Only the
+  // address is passed; the person still types their own mailbox password, so the
+  // panel never handles anyone's credentials.
+  const [email, setEmail] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    const q = new URLSearchParams(window.location.search).get('email') || ''
+    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(q) ? q.toLowerCase() : ''
+  })
+  const [pw, setPw] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false)
   // Only shown if we genuinely can't work out where this address's mail lives —
   // never for a mailbox on our own server.
   const [needsServer, setNeedsServer] = useState(false)
