@@ -36,6 +36,8 @@ export default function Zaim() {
   const [editAccount, setEditAccount] = useState<string | null>(null)
   const [reloadTick, setReloadTick] = useState(0) // bump to re-discover folders + reload mail (e.g. after repointing a mailbox's server)
   const [panelState, setPanelState] = useState({ spaces: true, context: true, ai: false })
+  const [handoff, setHandoff] = useState<null | { want: string; current: string }>(null)
+  const [legacySession, setLegacySession] = useState(false)
 
   const refreshMe = useCallback(async () => {
     const me = await api('/api/auth/me')
@@ -44,7 +46,31 @@ export default function Zaim() {
     setAvatar(me.user.avatar || '')
     const accs: Account[] = me.accounts || []
     setAccounts(accs)
-    setActiveAccount((cur) => cur && accs.some((a) => a.id === cur) ? cur : (accs.find((a) => a.isDefault)?.id || accs[0]?.id || ''))
+
+    // ZaiPanel opens a specific mailbox as `?email=<addr>`. Prefilling the sign-in
+    // form isn't enough: if a session already exists the form never renders, and
+    // the click silently lands in whatever inbox was already open. So resolve the
+    // request against the mailboxes this session can actually reach.
+    const want = (typeof window !== 'undefined'
+      ? new URLSearchParams(window.location.search).get('email') || '' : '').toLowerCase()
+    const clearWant = () => {
+      if (typeof window !== 'undefined') window.history.replaceState(null, '', window.location.pathname)
+    }
+    let target = ''
+    if (want) {
+      const match = accs.find((a) => a.email.toLowerCase() === want)
+      if (match) { target = match.id; clearWant() }
+      else { setHandoff({ want, current: me.user.email }) }   // different mailbox — ask
+    }
+
+    setActiveAccount((cur) => target || (cur && accs.some((a) => a.id === cur) ? cur
+      : (accs.find((a) => a.isDefault)?.id || accs[0]?.id || '')))
+
+    // A session created before mailbox sign-in existed has no sealed mailbox, so
+    // it still runs on stored IMAP/SMTP credentials. Nothing breaks, but the
+    // person is on the old path without knowing it — offer the one-click fix.
+    setLegacySession(accs.length > 0 && !accs.some((a) => a.id === 'mailbox'))
+
     setPhase(accs.length ? 'app' : 'add-account')
   }, [])
   useEffect(() => { refreshMe() }, [refreshMe])
@@ -237,6 +263,43 @@ export default function Zaim() {
         onClose={() => setEditAccount(null)}
         onSaved={() => { setEditAccount(null); refreshMe(); setReloadTick((t) => t + 1) }}
         onDeleted={() => { setEditAccount(null); refreshMe() }} />}
+      {handoff && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 backdrop-blur-sm p-6">
+          <div className="glass rounded-2xl p-7 w-full max-w-sm fade-in">
+            <h2 className="text-lg font-bold">Open a different mailbox</h2>
+            <p className="text-sm mt-2 leading-relaxed" style={{ color: 'var(--muted)' }}>
+              The panel asked to open <b style={{ color: 'var(--fg)' }}>{handoff.want}</b>, but you&rsquo;re
+              signed in as <b style={{ color: 'var(--fg)' }}>{handoff.current}</b>. Signing in as that
+              mailbox needs its own password.
+            </p>
+            <button
+              onClick={async () => { await api('/api/auth/logout', { method: 'POST' }); window.location.href = `/?email=${encodeURIComponent(handoff.want)}` }}
+              className="accent-grad text-white font-bold rounded-xl py-2.5 w-full mt-5 hover:opacity-90 text-sm">
+              Sign in as {handoff.want}
+            </button>
+            <button
+              onClick={() => { setHandoff(null); window.history.replaceState(null, '', window.location.pathname) }}
+              className="text-xs mt-3 w-full text-center hover:underline" style={{ color: 'var(--muted)' }}>
+              Stay signed in as {handoff.current}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {legacySession && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 glass rounded-xl px-4 py-3 flex items-center gap-3 fade-in max-w-[92vw]">
+          <span className="text-sm">
+            You&rsquo;re on an older session that still uses stored mail-server settings.
+          </span>
+          <button
+            onClick={async () => { await api('/api/auth/logout', { method: 'POST' }); window.location.reload() }}
+            className="accent-grad text-white text-xs font-bold px-3 py-1.5 rounded-lg hover:opacity-90 shrink-0">
+            Sign in again
+          </button>
+          <button onClick={() => setLegacySession(false)} className="text-xs shrink-0" style={{ color: 'var(--muted)' }}>Later</button>
+        </div>
+      )}
+
       {showKeys && <Keys accounts={accounts} onClose={() => setShowKeys(false)} />}
       {showProfile && <ProfileModal email={email} avatar={avatar} onClose={() => setShowProfile(false)} onSaved={(a) => setAvatar(a)} />}
     </div>
