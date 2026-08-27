@@ -1,5 +1,5 @@
 'use client'
-import { Att, ComposeInit, Full, Account, Folder, Avatar, emailOf, fmtSize, q } from '@/lib/client-utils'
+import { Att, ComposeInit, Full, Account, Folder, Avatar, emailOf, fmtSize, q, linkifyText } from '@/lib/client-utils'
 import { Compose } from './Compose'
 
 function Empty() {
@@ -63,7 +63,7 @@ export function ReadingCanvas({
             sandbox="allow-popups allow-popups-to-escape-sandbox"
             className="w-full bg-white"
             style={{ height: '60vh' }}
-            srcDoc={`<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body>${sel!.html || `<pre style="font-family:system-ui;white-space:pre-wrap;padding:24px;color:#111">${(sel!.text || '').replace(/</g, '&lt;')}</pre>`}</body></html>`}
+            srcDoc={`<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body>${sel!.html || `<pre style="font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.65;white-space:pre-wrap;word-wrap:break-word;padding:24px;margin:0;color:#111">${linkifyText(sel!.text || '')}</pre>`}</body></html>`}
           />
         </div>
       </div>

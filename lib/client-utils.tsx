@@ -76,3 +76,48 @@ export function Collapsible({ open, width, side = 'left', children }: { open: bo
     </div>
   )
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Plain-text email → safe HTML with working links.
+//
+//  A text-only message used to be dumped into a <pre> with only `<` escaped, so
+//  every URL in it was dead text. That matters most for exactly the emails whose
+//  whole purpose is a link — password resets, confirmations, invites.
+//
+//  Order is the security-critical part: escape EVERYTHING first, then linkify
+//  the escaped text. Doing it the other way round would let a crafted message
+//  inject markup through the href. Only http, https and mailto are linked, so
+//  `javascript:` and `data:` URLs stay inert text.
+// ─────────────────────────────────────────────────────────────────────────────
+export function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string))
+}
+
+export function linkifyText(text: string): string {
+  const esc = escapeHtml(text || '')
+  // Trailing punctuation is almost never part of the URL — "see https://x.com."
+  // should not link the full stop, and a closing bracket usually belongs to the
+  // sentence rather than the address.
+  const trim = (u: string) => {
+    const m = u.match(/[).,;:!?'\]]+$/)
+    return m ? { url: u.slice(0, -m[0].length), tail: m[0] } : { url: u, tail: '' }
+  }
+  const A = (href: string, label: string) =>
+    `<a href="${href}" target="_blank" rel="noopener noreferrer nofollow" ` +
+    `style="color:#2563eb;text-decoration:underline;word-break:break-all">${label}</a>`
+
+  return esc
+    // Absolute URLs. &amp; is already escaped, so it is safe inside href.
+    .replace(/\bhttps?:\/\/[^\s<>"']+/g, (m) => {
+      const { url, tail } = trim(m)
+      return A(url, url) + tail
+    })
+    // www.… without a scheme, which mail clients also make clickable.
+    .replace(/(^|[\s(])(www\.[^\s<>"']+)/g, (_m, pre: string, raw: string) => {
+      const { url, tail } = trim(raw)
+      return pre + A('https://' + url, url) + tail
+    })
+    // Bare email addresses.
+    .replace(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g, (m) => A('mailto:' + m, m))
+}
