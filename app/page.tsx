@@ -71,7 +71,17 @@ export default function Zaim() {
     // person is on the old path without knowing it — offer the one-click fix.
     setLegacySession(accs.length > 0 && !accs.some((a) => a.id === 'mailbox'))
 
-    setPhase(accs.length ? 'app' : 'add-account')
+    // No mailbox at all means this session predates mailbox sign-in and its
+    // saved accounts are gone — there is nothing to show. The old "connect a
+    // mailbox" form is the wrong answer here: it asks for IMAP/SMTP details
+    // that signing in no longer needs, and it strands anyone who simply
+    // removed their old accounts. Send them to sign in instead.
+    if (!accs.length) {
+      await api('/api/auth/logout', { method: 'POST' })
+      setAccounts([]); setPhase('auth'); return
+    }
+
+    setPhase('app')
   }, [])
   useEffect(() => { refreshMe() }, [refreshMe])
 
