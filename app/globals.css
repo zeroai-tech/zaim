@@ -48,3 +48,6 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .anim-safe { animation: none !important; }
 }
+
+/* Drawer entrance on phones. */
+@keyframes slideIn { from { transform: translateX(-8%); opacity: .6 } to { transform: none; opacity: 1 } }

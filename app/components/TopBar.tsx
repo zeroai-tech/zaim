@@ -8,7 +8,7 @@ export function TopBar({
   search, onSearch,
   onCompose,
   onShowKeys, onShowProfile, onLogout,
-  panelState, onTogglePanel,
+  panelState, onTogglePanel, onOpenDrawer,
 }: {
   accounts: Account[]; activeAccount: string; activeEmail: string; activeLabel: string; email: string; avatar: string
   onSwitchAccount: (id: string) => void; onAddAccount: () => void; onEditAccount: (id: string) => void
@@ -17,6 +17,8 @@ export function TopBar({
   onShowKeys: () => void; onShowProfile: () => void; onLogout: () => void
   panelState: { spaces: boolean; context: boolean; ai: boolean }
   onTogglePanel: (p: 'spaces' | 'context' | 'ai') => void
+  /** Phones have no room for a folder column, so the same control opens a drawer. */
+  onOpenDrawer: () => void
 }) {
   const [acctMenu, setAcctMenu] = useState(false)
   const [profMenu, setProfMenu] = useState(false)
@@ -24,7 +26,8 @@ export function TopBar({
 
   return (
     <header className="h-[72px] shrink-0 flex items-center gap-3 px-4" style={{ borderBottom: '1px solid var(--line)' }}>
-      <button onClick={() => onTogglePanel('spaces')} title="Toggle Spaces" className={toggleBtn + (panelState.spaces ? ' text-white' : ' text-[color:var(--muted)]')}>☰</button>
+      <button onClick={onOpenDrawer} title="Folders" aria-label="Folders" className={toggleBtn + ' md:hidden text-[color:var(--muted)]'}>☰</button>
+      <button onClick={() => onTogglePanel('spaces')} title="Toggle Spaces" className={toggleBtn + ' hidden md:grid' + (panelState.spaces ? ' text-white' : ' text-[color:var(--muted)]')}>☰</button>
       <div className="flex items-center gap-2 mr-1"><Mark /><span className="font-extrabold tracking-tight text-[15px] hidden sm:inline">Zaim</span></div>
 
       {/* Account switcher */}

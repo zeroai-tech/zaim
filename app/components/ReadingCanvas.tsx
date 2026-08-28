@@ -11,11 +11,13 @@ function Empty() {
 
 export function ReadingCanvas({
   sel, selUid, activeFolder, folders, activeAccount, loadingDraft, onEditDraft, deleting, onDelete, onReply,
-  compose, from, account, onComposeClose, onComposeSent,
+  compose, from, account, onComposeClose, onComposeSent, onBack,
 }: {
   sel: Full | null; selUid: number | null; activeFolder: string; folders: Folder[]; activeAccount: string
   loadingDraft: boolean; onEditDraft: () => void; deleting: boolean; onDelete: () => void; onReply: () => void
   compose: ComposeInit | null; from?: string; account: string; onComposeClose: () => void; onComposeSent: () => void
+  /** Returns a phone to the message list; the list is a sibling column on desktop. */
+  onBack: () => void
 }) {
   if (compose) return <Compose initial={compose} from={from} account={account} onClose={onComposeClose} onSent={onComposeSent} />
   if (!sel && selUid == null) return <Empty />
@@ -23,12 +25,17 @@ export function ReadingCanvas({
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-[900px] mx-auto px-8 py-10 fade-in">
-        <h2 className="text-2xl font-bold leading-snug">{sel!.subject}</h2>
-        <div className="flex items-center gap-3 mt-5 pb-6" style={{ borderBottom: '1px solid var(--line)' }}>
-          <Avatar email={emailOf(sel!.from)} name={sel!.fromName || sel!.from} cls="w-11 h-11 rounded-full text-sm" txt="text-sm" />
+      <div className="max-w-[900px] mx-auto px-4 py-5 sm:px-8 sm:py-10 fade-in">
+        <button onClick={onBack}
+          className="md:hidden -ml-1 mb-3 flex items-center gap-1.5 text-sm font-semibold py-1.5 pr-3 rounded-lg hover:bg-white/5"
+          style={{ color: 'var(--muted)' }}>
+          <span aria-hidden>‹</span> All mail
+        </button>
+        <h2 className="text-xl sm:text-2xl font-bold leading-snug">{sel!.subject}</h2>
+        <div className="flex items-center gap-3 mt-4 pb-4 sm:mt-5 sm:pb-6" style={{ borderBottom: '1px solid var(--line)' }}>
+          <Avatar email={emailOf(sel!.from)} name={sel!.fromName || sel!.from} cls="w-9 h-9 sm:w-11 sm:h-11 rounded-full text-sm shrink-0" txt="text-sm" />
           <div className="min-w-0"><div className="text-sm font-semibold truncate">{sel!.fromName || sel!.from}</div><div className="text-xs text-[color:var(--muted)] truncate">{sel!.from} · to {sel!.to}</div></div>
-          <span className="ml-auto text-xs text-[color:var(--muted)] shrink-0">{new Date(sel!.date).toLocaleString()}</span>
+          <span className="ml-auto text-xs text-[color:var(--muted)] shrink-0 hidden sm:inline">{new Date(sel!.date).toLocaleString()}</span>
           {activeFolder === 'drafts'
             ? <button onClick={onEditDraft} disabled={loadingDraft} className="text-xs font-semibold px-3 py-1.5 rounded-lg accent-grad text-white hover:opacity-90 disabled:opacity-50 shrink-0">{loadingDraft ? 'Loading…' : '✏️ Edit & Send'}</button>
             : <button data-testid="reply-button" onClick={onReply} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 shrink-0">↩ Reply</button>}
@@ -62,7 +69,7 @@ export function ReadingCanvas({
             title="message"
             sandbox="allow-popups allow-popups-to-escape-sandbox"
             className="w-full bg-white"
-            style={{ height: '60vh' }}
+            style={{ height: 'min(60vh, 520px)' }}
             srcDoc={`<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body>${sel!.html || `<pre style="font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.65;white-space:pre-wrap;word-wrap:break-word;padding:24px;margin:0;color:#111">${linkifyText(sel!.text || '')}</pre>`}</body></html>`}
           />
         </div>

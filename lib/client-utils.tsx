@@ -69,10 +69,29 @@ export const field = 'w-full bg-[color:var(--panel-2)] border rounded-xl px-4 py
 export function Collapsible({ open, width, side = 'left', children }: { open: boolean; width: number; side?: 'left' | 'right'; children: React.ReactNode }) {
   return (
     <div
-      className="h-full overflow-hidden shrink-0 transition-[width] duration-200 ease-out"
+      className="hidden md:block h-full overflow-hidden shrink-0 transition-[width] duration-200 ease-out"
       style={{ width: open ? width : 0, borderRight: side === 'left' ? (open ? '1px solid var(--line)' : 'none') : undefined, borderLeft: side === 'right' ? (open ? '1px solid var(--line)' : 'none') : undefined }}
     >
       <div style={{ width }} className="h-full">{children}</div>
+    </div>
+  )
+}
+
+// A slide-over for phones. The side panels are columns on a desktop, but on a
+// 390px screen a column leaves no room for the mail itself — so on mobile the
+// same content arrives over the top and dismisses on tap-away, which is what a
+// phone user expects from a drawer.
+export function Drawer({ open, onClose, side = 'left', children }: { open: boolean; onClose: () => void; side?: 'left' | 'right'; children: React.ReactNode }) {
+  if (!open) return null
+  return (
+    <div className="md:hidden fixed inset-0 z-40" role="dialog" aria-modal="true">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} />
+      <div
+        className={`absolute top-0 bottom-0 w-[82vw] max-w-[300px] overflow-y-auto ${side === 'left' ? 'left-0' : 'right-0'}`}
+        style={{ background: 'var(--bg)', borderRight: side === 'left' ? '1px solid var(--line)' : undefined, borderLeft: side === 'right' ? '1px solid var(--line)' : undefined, animation: 'slideIn .18s ease-out' }}
+      >
+        {children}
+      </div>
     </div>
   )
 }

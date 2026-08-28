@@ -3,7 +3,7 @@ import { useEffect, useState, useCallback, useRef } from 'react'
 import {
   Msg, Full, Att, ComposeInit, Account, Folder, SmartView,
   api, q, isToday,
-  Avatar, Mark, Collapsible, field,
+  Avatar, Mark, Collapsible, Drawer, field,
 } from '@/lib/client-utils'
 import { TopBar } from './components/TopBar'
 import { SpacesPanel } from './components/SpacesPanel'
@@ -36,6 +36,10 @@ export default function Zaim() {
   const [editAccount, setEditAccount] = useState<string | null>(null)
   const [reloadTick, setReloadTick] = useState(0) // bump to re-discover folders + reload mail (e.g. after repointing a mailbox's server)
   const [panelState, setPanelState] = useState({ spaces: true, context: true, ai: false })
+  // Which single pane a phone is showing. Desktop ignores this entirely and
+  // keeps every column visible.
+  const [mobilePane, setMobilePane] = useState<'list' | 'reader'>('list')
+  const [drawer, setDrawer] = useState(false)
   const [handoff, setHandoff] = useState<null | { want: string; current: string }>(null)
   const [legacySession, setLegacySession] = useState(false)
 
@@ -188,6 +192,10 @@ export default function Zaim() {
   }
   // Open a message found via mailbox-wide attachment search — it may live in a
   // different folder than the one currently active, so switch to it first.
+  // Opening or composing takes a phone to the reading pane; the list is one
+  // tap away via Back.
+  function showReader() { setMobilePane('reader') }
+
   async function openFromSearch(mailbox: string, uid: number) {
     const f = folders.find((x) => x.path === mailbox)
     if (f) { setSearch(''); setSmartView(null); setActiveFolder(f.key) }
@@ -225,23 +233,33 @@ export default function Zaim() {
         onAddAccount={() => setPhase('add-account')}
         onEditAccount={(id) => setEditAccount(id)}
         search={search} onSearch={setSearch}
-        onCompose={() => setCompose({ to: '', subject: '' })}
+        onCompose={() => { setCompose({ to: '', subject: '' }); showReader() }}
         onShowKeys={() => setShowKeys(true)} onShowProfile={() => setShowProfile(true)} onLogout={logout}
-        panelState={panelState} onTogglePanel={togglePanel}
+        panelState={panelState} onTogglePanel={togglePanel} onOpenDrawer={() => setDrawer(true)}
       />
       <div className="flex-1 flex overflow-hidden">
         <Collapsible open={panelState.spaces} width={220}>
           <SpacesPanel folders={folders} activeFolder={activeFolder} smartView={smartView} onSelectFolder={selectFolder} onSelectSmartView={setSmartView} />
         </Collapsible>
+        <Drawer open={drawer} onClose={() => setDrawer(false)}>
+          <SpacesPanel
+            folders={folders} activeFolder={activeFolder} smartView={smartView}
+            onSelectFolder={(k) => { selectFolder(k); setDrawer(false); setMobilePane('list') }}
+            onSelectSmartView={(v) => { setSmartView(v); setDrawer(false); setMobilePane('list') }}
+          />
+        </Drawer>
 
-        <div className="w-[360px] shrink-0 h-full" style={{ borderRight: '1px solid var(--line)' }}>
+        <div
+          className={`w-full md:w-[360px] shrink-0 h-full ${mobilePane === 'reader' ? 'hidden md:block' : 'block'}`}
+          style={{ borderRight: '1px solid var(--line)' }}
+        >
           <ConversationList
             messages={visibleMessages}
             activeFolder={activeFolder}
             selUid={selUid}
             listLoading={listLoading}
             folderTitle={folderTitle}
-            onOpen={open}
+            onOpen={(uid: number) => { open(uid); showReader() }}
             onRefresh={() => load(false)}
             onDelete={deleteMail}
             deleting={deleting}
@@ -251,8 +269,12 @@ export default function Zaim() {
           />
         </div>
 
-        <div className="flex-1 min-w-0 h-full" style={{ borderRight: '1px solid var(--line)' }}>
+        <div
+          className={`flex-1 min-w-0 h-full ${mobilePane === 'list' ? 'hidden md:block' : 'block'}`}
+          style={{ borderRight: '1px solid var(--line)' }}
+        >
           <ReadingCanvas
+            onBack={() => { setMobilePane('list'); setSel(null); setSelUid(null) }}
             sel={sel} selUid={selUid} activeFolder={activeFolder} folders={folders} activeAccount={activeAccount}
             loadingDraft={loadingDraft} onEditDraft={editDraft} deleting={deleting} onDelete={deleteMail}
             onReply={() => sel && setCompose({ to: sel.from.replace(/.*<|>.*/g, ''), subject: 'Re: ' + sel.subject })}
