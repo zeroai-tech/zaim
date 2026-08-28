@@ -25,13 +25,13 @@ export function TopBar({
   const toggleBtn = 'w-8 h-8 rounded-lg grid place-items-center text-sm hover:bg-white/5 transition shrink-0'
 
   return (
-    <header className="h-[72px] shrink-0 flex items-center gap-3 px-4" style={{ borderBottom: '1px solid var(--line)' }}>
+    <header className="h-14 md:h-[72px] shrink-0 flex items-center gap-2 md:gap-3 px-3 md:px-4 overflow-hidden" style={{ borderBottom: '1px solid var(--line)' }}>
       <button onClick={onOpenDrawer} title="Folders" aria-label="Folders" className={toggleBtn + ' md:hidden text-[color:var(--muted)]'}>☰</button>
       <button onClick={() => onTogglePanel('spaces')} title="Toggle Spaces" className={toggleBtn + ' hidden md:grid' + (panelState.spaces ? ' text-white' : ' text-[color:var(--muted)]')}>☰</button>
-      <div className="flex items-center gap-2 mr-1"><Mark /><span className="font-extrabold tracking-tight text-[15px] hidden sm:inline">Zaim</span></div>
+      <div className="flex items-center gap-2 mr-0 md:mr-1 shrink-0"><Mark /><span className="font-extrabold tracking-tight text-[15px] hidden sm:inline">Zaim</span></div>
 
       {/* Account switcher */}
-      <div className="relative">
+      <div className="relative shrink-0">
         <button onClick={() => setAcctMenu((v) => !v)} className="flex items-center gap-2 rounded-xl pl-1.5 pr-2.5 py-1.5 hover:bg-white/5 transition text-left" style={{ border: '1px solid var(--line)' }}>
           <span className="w-6 h-6 rounded-md grid place-items-center text-[10px] font-bold text-white shrink-0" style={{ background: avatarColor(activeEmail) }}>{initials(activeEmail)}</span>
           <span className="min-w-0 hidden md:block"><span className="block text-xs font-semibold truncate max-w-[140px]">{activeLabel}</span></span>
@@ -55,7 +55,7 @@ export function TopBar({
       </div>
 
       {/* Search — filters the currently loaded conversation list by subject/sender */}
-      <div className="flex-1 max-w-xl mx-2">
+      <div className="hidden md:block flex-1 max-w-xl mx-2">
         <div className="flex items-center gap-2 rounded-xl px-3 h-9" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }}>
           <span className="text-[color:var(--muted)] text-sm">⌕</span>
           <input value={search} onChange={(e) => onSearch(e.target.value)} placeholder="Search this folder…" className="flex-1 bg-transparent text-sm outline-none placeholder:text-[color:var(--muted)]" />
@@ -63,10 +63,14 @@ export function TopBar({
         </div>
       </div>
 
-      <button onClick={onCompose} className="accent-grad text-white font-bold rounded-xl px-4 py-2 text-sm hover:opacity-90 transition shrink-0">✏️ Compose</button>
+      <div className="flex-1 md:hidden" />
+      <button onClick={onCompose} aria-label="Compose"
+        className="accent-grad text-white font-bold rounded-xl px-3 md:px-4 py-2 text-sm hover:opacity-90 transition shrink-0">
+        ✏️<span className="hidden md:inline"> Compose</span>
+      </button>
 
-      <button onClick={() => onTogglePanel('context')} title="Toggle context panel" className={toggleBtn + (panelState.context ? ' text-white' : ' text-[color:var(--muted)]')}>ⓘ</button>
-      <button onClick={() => onTogglePanel('ai')} title="Toggle AI assistant" className={toggleBtn + (panelState.ai ? ' text-white' : ' text-[color:var(--muted)]')}>✦</button>
+      <button onClick={() => onTogglePanel('context')} title="Toggle context panel" className={toggleBtn + ' hidden md:grid' + (panelState.context ? ' text-white' : ' text-[color:var(--muted)]')}>ⓘ</button>
+      <button onClick={() => onTogglePanel('ai')} title="Toggle AI assistant" className={toggleBtn + ' hidden md:grid' + (panelState.ai ? ' text-white' : ' text-[color:var(--muted)]')}>✦</button>
 
       {/* Profile */}
       <div className="relative ml-1">

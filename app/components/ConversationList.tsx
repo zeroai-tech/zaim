@@ -3,20 +3,33 @@ import { Msg, Avatar, emailOf, when } from '@/lib/client-utils'
 
 export function ConversationList({
   messages, activeFolder, selUid, listLoading, folderTitle, onOpen, onRefresh, onDelete, deleting,
-  hasMore, loadingMore, onLoadMore
+  hasMore, loadingMore, onLoadMore, search, onSearch
 }: {
   messages: Msg[]; activeFolder: string; selUid: number | null; listLoading: boolean; folderTitle: string
   onOpen: (uid: number) => void; onRefresh: () => void; onDelete: (uid: number) => void; deleting: boolean
   hasMore?: boolean; loadingMore?: boolean; onLoadMore?: () => void
+  /** Search lives in the top bar on desktop; on a phone that bar has no room
+   *  for it, so it belongs here above the messages it filters. */
+  search: string; onSearch: (v: string) => void
 }) {
   const isSentLike = activeFolder === 'sent' || activeFolder === 'drafts'
   const trashLabel = activeFolder === 'trash' ? 'Delete permanently' : 'Move to Trash'
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <header className="flex items-center justify-between px-4 h-12 shrink-0" style={{ borderBottom: '1px solid var(--line)' }}>
-        <h1 className="font-bold text-sm">{folderTitle}</h1>
-        <button onClick={onRefresh} className="text-xs text-[color:var(--muted)] hover:text-white">↻ Refresh</button>
+      <header className="shrink-0" style={{ borderBottom: '1px solid var(--line)' }}>
+        <div className="flex items-center justify-between px-4 h-12">
+          <h1 className="font-bold text-sm">{folderTitle}</h1>
+          <button onClick={onRefresh} className="text-xs text-[color:var(--muted)] hover:text-white">↻ Refresh</button>
+        </div>
+        <div className="md:hidden px-3 pb-2.5">
+          <div className="flex items-center gap-2 rounded-xl px-3 h-9" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }}>
+            <span className="text-[color:var(--muted)] text-sm">⌕</span>
+            <input value={search} onChange={(e) => onSearch(e.target.value)} placeholder="Search this folder…"
+              className="flex-1 min-w-0 bg-transparent text-sm outline-none placeholder:text-[color:var(--muted)]" />
+            {search && <button onClick={() => onSearch('')} aria-label="Clear search" className="text-[color:var(--muted)] hover:text-white text-xs">✕</button>}
+          </div>
+        </div>
       </header>
       <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1.5 pb-8">
         {listLoading && <div className="p-4 text-sm text-[color:var(--muted)]">Loading…</div>}

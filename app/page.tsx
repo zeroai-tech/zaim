@@ -266,6 +266,8 @@ export default function Zaim() {
             hasMore={hasMore}
             loadingMore={loadingMore}
             onLoadMore={() => load(true)}
+            search={search}
+            onSearch={setSearch}
           />
         </div>
 
