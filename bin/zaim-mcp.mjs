@@ -14,9 +14,25 @@
 //    ZAIM_API_KEY  a per-user Agent Key minted in Zaim ("🔑 Agent keys")
 // ─────────────────────────────────────────────────────────────────────────────
 import { createInterface } from 'node:readline'
+import * as oauth from './lib/oauth.mjs'
 
 const BASE = (process.env.ZAIM_URL || 'http://localhost:3000').replace(/\/$/, '')
 const KEY = process.env.ZAIM_API_KEY || ''
+
+// Authentication, preferring the mail server over the database.
+//
+// `zaim login` signs in against Stalwart itself and stores a refreshable token
+// here, so nothing about this agent's access lives in a database — revoking it
+// on the mail server ends it everywhere. ZAIM_API_KEY still works for anyone who
+// has not migrated, so this can be rolled out without breaking a running setup.
+async function authHeader() {
+  try {
+    const c = await oauth.accessToken()
+    if (c?.access_token) return `Bearer stalwart ${c.email} ${c.access_token}`
+  } catch { /* fall through to the key below */ }
+  if (KEY) return `Bearer ${KEY}`
+  throw new Error('Not signed in. Run `zaim login you@yourdomain.com`, or set ZAIM_API_KEY.')
+}
 const NAME = 'zaim'
 const VERSION = '0.1.0'
 
@@ -24,7 +40,7 @@ const VERSION = '0.1.0'
 async function call(path, init) {
   const res = await fetch(BASE + path, {
     ...init,
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${KEY}`, ...(init?.headers || {}) },
+    headers: { 'content-type': 'application/json', authorization: await authHeader(), ...(init?.headers || {}) },
   })
   const body = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(body.error || `${res.status} ${res.statusText}`)

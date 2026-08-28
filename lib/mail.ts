@@ -4,6 +4,15 @@ import MailComposer from 'nodemailer/lib/mail-composer/index.js'
 import { simpleParser } from 'mailparser'
 import type { MailAccount } from './config'
 
+// Marks a credential as an OAuth access token rather than a password.
+export const OAUTH_PREFIX = 'oauth2:'
+
+// Nodemailer wants the same distinction spelled differently.
+export const smtpAuth = (smtp: { user: string; pass: string }) =>
+  smtp.pass.startsWith(OAUTH_PREFIX)
+    ? { type: 'OAuth2' as const, user: smtp.user, accessToken: smtp.pass.slice(OAUTH_PREFIX.length) }
+    : { user: smtp.user, pass: smtp.pass }
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  The mail engine — the same proven imapflow + nodemailer + mailparser core the
 //  ZeroAI mailer runs. Serverless-friendly: every call opens a connection, does
@@ -36,14 +45,24 @@ export interface MailFull extends MailSummary {
 // TOO fast: 8s greeting turned out to be tighter than this account's real
 // mail host needs under normal (non-stalled) conditions, so every call
 // started failing outright instead of just the genuinely-stuck ones.
+// A mailbox reached with an OAuth token instead of a password. Stalwart's IMAP
+// advertises OAUTHBEARER/XOAUTH2, so a token it issued authenticates directly —
+// which is what lets agent access work with no credential stored on our side.
+export interface OAuthAuth { user: string; accessToken: string }
+
 interface ImapTimeouts { connectionTimeout: number; greetingTimeout: number; socketTimeout: number }
 const DEFAULT_TIMEOUTS: ImapTimeouts = { connectionTimeout: 20_000, greetingTimeout: 15_000, socketTimeout: 30_000 }
 
 async function withImap<T>(account: MailAccount, fn: (c: ImapFlow) => Promise<T>, timeouts: ImapTimeouts = DEFAULT_TIMEOUTS): Promise<T> {
   const { imap } = account
+  // `pass` beginning with the OAuth marker means the caller holds a token, not a
+  // password; imapflow then negotiates XOAUTH2/OAUTHBEARER instead of PLAIN.
+  const oauthToken = imap.pass.startsWith(OAUTH_PREFIX) ? imap.pass.slice(OAUTH_PREFIX.length) : ''
   const client = new ImapFlow({
     host: imap.host, port: imap.port, secure: imap.secure,
-    auth: { user: imap.user, pass: imap.pass },
+    auth: oauthToken
+      ? { user: imap.user, accessToken: oauthToken }
+      : { user: imap.user, pass: imap.pass },
     logger: false,
     ...timeouts,
   })
@@ -208,7 +227,7 @@ const smtpTimeouts = { connectionTimeout: 20_000, greetingTimeout: 15_000, socke
 export async function sendMail(account: MailAccount, input: SendInput): Promise<{ messageId: string; raw: Buffer }> {
   const { smtp, from } = account
   const raw = await buildRaw(account, input)
-  const t = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.secure, auth: { user: smtp.user, pass: smtp.pass }, ...smtpTimeouts })
+  const t = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.secure, auth: smtpAuth(smtp), ...smtpTimeouts })
   const to = [input.to, input.cc, input.bcc].filter(Boolean).join(',')
   const info = await t.sendMail({ envelope: { from: from.email, to }, raw })
   return { messageId: info.messageId, raw }
@@ -324,7 +343,7 @@ export async function verify(account: MailAccount): Promise<{ imap: boolean; smt
   try { await withImap(account, async () => {}); res.imap = true } catch (e) { res.error = 'IMAP: ' + (e as Error).message }
   try {
     const { smtp } = account
-    const t = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.secure, auth: { user: smtp.user, pass: smtp.pass }, ...smtpTimeouts })
+    const t = nodemailer.createTransport({ host: smtp.host, port: smtp.port, secure: smtp.secure, auth: smtpAuth(smtp), ...smtpTimeouts })
     await t.verify(); res.smtp = true
   } catch (e) { res.error = (res.error ? res.error + ' | ' : '') + 'SMTP: ' + (e as Error).message }
   return res

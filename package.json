@@ -2,11 +2,12 @@
   "name": "zaim",
   "version": "0.1.0",
   "private": true,
-  "description": "Zaim — a secure, stylish mail client with an agent API. Human webapp + CLI + AI-agent control (Claude Code, Gemini, Codex). By ZeroAI.",
+  "description": "Zaim \u2014 a secure, stylish mail client with an agent API. Human webapp + CLI + AI-agent control (Claude Code, Gemini, Codex). By ZeroAI.",
   "type": "module",
   "bin": {
     "zaim": "./bin/zaim.mjs",
-    "zaim-mcp": "./bin/zaim-mcp.mjs"
+    "zaim-mcp": "./bin/zaim-mcp.mjs",
+    "zaim-login": "./bin/zaim-login.mjs"
   },
   "scripts": {
     "dev": "next dev",
@@ -19,11 +20,14 @@
     "desktop:dist": "next build && node electron/stage.cjs && electron-builder"
   },
   "dependencies": {
+    "@composio/core": "^0.14.0",
     "better-sqlite3": "^12.11.1",
+    "composio-core": "^0.5.39",
     "imapflow": "^1.0.171",
-    "mailparser": "^3.7.2",
+    "mailparser": "^3.9.15",
     "next": "^15.1.0",
     "nodemailer": "^6.9.16",
+    "openai": "^6.49.0",
     "pg": "^8.22.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
@@ -48,7 +52,7 @@
   "build": {
     "appId": "tech.zeroai.zaim",
     "productName": "Zaim",
-    "copyright": "© ZeroAI Technologies",
+    "copyright": "\u00a9 ZeroAI Technologies",
     "asar": false,
     "files": [
       "electron/**",
