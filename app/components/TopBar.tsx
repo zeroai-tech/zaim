@@ -25,7 +25,7 @@ export function TopBar({
   const toggleBtn = 'w-8 h-8 rounded-lg grid place-items-center text-sm hover:bg-white/5 transition shrink-0'
 
   return (
-    <header className="h-14 md:h-[72px] shrink-0 flex items-center gap-2 md:gap-3 px-3 md:px-4 overflow-hidden" style={{ borderBottom: '1px solid var(--line)' }}>
+    <header className="relative z-40 h-14 md:h-[72px] shrink-0 flex items-center gap-2 md:gap-3 px-3 md:px-4" style={{ borderBottom: '1px solid var(--line)' }}>
       <button onClick={onOpenDrawer} title="Folders" aria-label="Folders" className={toggleBtn + ' md:hidden text-[color:var(--muted)]'}>☰</button>
       <button onClick={() => onTogglePanel('spaces')} title="Toggle Spaces" className={toggleBtn + ' hidden md:grid' + (panelState.spaces ? ' text-white' : ' text-[color:var(--muted)]')}>☰</button>
       <div className="flex items-center gap-2 mr-0 md:mr-1 shrink-0"><Mark /><span className="font-extrabold tracking-tight text-[15px] hidden sm:inline">Zaim</span></div>
@@ -38,7 +38,7 @@ export function TopBar({
           <span className="text-[color:var(--muted)] text-[10px]">{acctMenu ? '▲' : '▼'}</span>
         </button>
         {acctMenu && (
-          <div className="absolute z-20 left-0 top-[42px] w-64 glass rounded-xl p-1.5 shadow-xl fade-in" style={{ border: '1px solid var(--line)' }}>
+          <div className="absolute z-50 left-0 top-[42px] w-64 glass rounded-xl p-1.5 shadow-xl fade-in" style={{ border: '1px solid var(--line)' }}>
             {accounts.map((a) => (
               <div key={a.id} className={`group w-full flex items-center gap-1 rounded-lg pr-1 hover:bg-white/5 ${a.id === activeAccount ? 'bg-white/5' : ''}`}>
                 <button onClick={() => { onSwitchAccount(a.id); setAcctMenu(false) }} className="flex-1 min-w-0 flex items-center gap-2 px-2 py-2 text-left">
@@ -78,7 +78,7 @@ export function TopBar({
           <Avatar src={avatar} name={email} cls="w-8 h-8 rounded-full text-[11px]" />
         </button>
         {profMenu && (
-          <div className="absolute z-20 right-0 top-[42px] w-56 glass rounded-xl p-1.5 shadow-xl fade-in" style={{ border: '1px solid var(--line)' }}>
+          <div className="absolute z-50 right-0 top-[42px] w-56 glass rounded-xl p-1.5 shadow-xl fade-in" style={{ border: '1px solid var(--line)' }}>
             <div className="px-2.5 py-2 text-xs text-[color:var(--muted)] truncate">{email}</div>
             <button onClick={() => { setProfMenu(false); onShowProfile() }} className="w-full text-left rounded-lg px-2.5 py-2 text-xs hover:bg-white/5">✎ Edit profile picture</button>
             <button onClick={() => { setProfMenu(false); onShowKeys() }} className="w-full text-left rounded-lg px-2.5 py-2 text-xs hover:bg-white/5">🔑 Agent keys</button>
