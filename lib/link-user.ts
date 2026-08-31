@@ -1,7 +1,7 @@
 import crypto from 'node:crypto'
 import { userIdFromReq, makeSession, sessionCookie, hashPassword } from './session'
 import { mailboxFromReq } from './mailbox-session'
-import { createUser, findUserByEmail } from './store'
+import { createUser, findUserByEmail, storeAvailable } from './store'
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Reading mail needs no database. A few extras do: agent API keys, a profile
@@ -22,6 +22,8 @@ export async function ensureUserId(req: Request): Promise<Linked> {
 
   const mb = mailboxFromReq(req)
   if (!mb) return { uid: null }
+  // Nothing to link to. Mail still works; only the extras that need a row don't.
+  if (!storeAvailable()) return { uid: null }
 
   const existing = await findUserByEmail(mb.email)
   // Unguessable filler: this account is reached by proving the mailbox over

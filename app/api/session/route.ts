@@ -29,6 +29,14 @@ export async function GET(req: Request) {
   const provided = bearer || (cookieKey ? decodeURIComponent(cookieKey) : '')
   if (!provided) return json({ authed: false, configured: false })
 
+  // A token issued by the mail server. Nothing to look up — the mail routes
+  // hand it straight to IMAP, so status must agree rather than reporting the
+  // caller unauthenticated for a credential that demonstrably works.
+  if (provided.startsWith('stalwart ')) {
+    const [, email, token] = provided.split(' ')
+    return json({ authed: !!(email && token), configured: !!(email && token), via: 'mail-server token', email })
+  }
+
   const owner = await findByApiKey(provided)
   if (owner) {
     const account = await resolveAccount(owner.userId, owner.accountId || undefined)

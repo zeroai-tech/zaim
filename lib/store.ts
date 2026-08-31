@@ -18,6 +18,20 @@ import { encryptSecret, decryptSecret, type MailAccount } from './config'
 const PG_URL = process.env.POSTGRES_URL || process.env.DATABASE_URL || ''
 const usePg = !!PG_URL
 
+// Running with no database at all is now the normal case.
+//
+// Signing in and reading mail never touch a store — the mail server is the
+// authority, and credentials travel in a sealed cookie or an OAuth token. What
+// remained here were conveniences: a profile picture, saved third-party
+// mailboxes, and agent keys, and agent keys have been replaced by tokens the
+// mail server issues.
+//
+// So when neither POSTGRES_URL nor a writable disk is available, every read
+// answers empty and every write is refused with a message that says why,
+// instead of the app crashing on a connection that was never configured.
+const NO_STORE = !PG_URL && !!process.env.VERCEL
+export const storeAvailable = () => !NO_STORE
+
 type Params = readonly unknown[]
 interface Driver {
   run(sql: string, p?: Params): Promise<void>
@@ -97,15 +111,19 @@ async function makeSqlite(): Promise<Driver> {
 }
 
 let _ready: Promise<Driver> | null = null
-const ready = (): Promise<Driver> => (_ready ??= (usePg ? makePg() : makeSqlite()))
+const ready = (): Promise<Driver> => {
+  if (NO_STORE) throw new Error('This deployment has no database — mail works without one; profile pictures and saved third-party mailboxes need one.')
+  return (_ready ??= (usePg ? makePg() : makeSqlite()))
+}
 
 const id = () => crypto.randomUUID()
 
 // Diagnostic: confirm the DB is reachable + report which backend is active.
-export async function dbPing(): Promise<{ backend: 'postgres' | 'sqlite' }> {
+export async function dbPing(): Promise<{ backend: 'postgres' | 'sqlite' | 'none' }> {
+  if (NO_STORE) return { backend: 'none' }
   const d = await ready()
   await d.get('SELECT 1 AS one')
-  return { backend: usePg ? 'postgres' : 'sqlite' }
+  return { backend: usePg ? 'postgres' : 'sqlite' } as { backend: 'postgres' | 'sqlite' | 'none' }
 }
 
 // ── Users ────────────────────────────────────────────────────────────────────
@@ -116,10 +134,13 @@ export async function createUser(email: string, pwHash: string): Promise<User> {
   return u
 }
 export const findUserByEmail = async (email: string): Promise<User | undefined> =>
+  NO_STORE ? undefined :
   (await ready()).get<User>('SELECT * FROM users WHERE email = $1', [email.toLowerCase()])
 export const findUserById = async (uid: string): Promise<User | undefined> =>
+  NO_STORE ? undefined :
   (await ready()).get<User>('SELECT * FROM users WHERE id = $1', [uid])
 export async function setUserAvatar(userId: string, avatar: string | null): Promise<void> {
+  if (NO_STORE) throw new Error('Profile pictures need a database, and this deployment has none.')
   await (await ready()).run('UPDATE users SET avatar = $1 WHERE id = $2', [avatar, userId])
 }
 
@@ -150,6 +171,7 @@ export async function addAccount(userId: string, a: AccountInput): Promise<strin
   return aid
 }
 export const listAccounts = async (userId: string): Promise<AccountRow[]> =>
+  NO_STORE ? [] :
   (await ready()).all<AccountRow>('SELECT * FROM accounts WHERE user_id = $1 ORDER BY is_default DESC, created_at ASC', [userId])
 
 export async function setDefault(userId: string, accountId: string) {
@@ -235,6 +257,7 @@ export async function repointAccounts(hostLike: string, newHost: string): Promis
 
 // Resolve the MailAccount (decrypted) for a user's chosen/default account.
 export async function resolveAccount(userId: string, accountId?: string): Promise<MailAccount | null> {
+  if (NO_STORE) return null
   const rows = await listAccounts(userId)
   const r = (accountId ? rows.find((x) => x.id === accountId) : rows.find((x) => x.is_default)) || rows[0]
   if (!r) return null
@@ -260,12 +283,14 @@ export async function createApiKey(userId: string, label?: string, accountId?: s
   return { row, secret }
 }
 export const listApiKeys = async (userId: string): Promise<ApiKeyRow[]> =>
+  NO_STORE ? [] :
   (await ready()).all<ApiKeyRow>('SELECT id,user_id,label,account_id,created_at,last_used FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC', [userId])
 export async function revokeApiKey(userId: string, keyId: string) {
   await (await ready()).run('DELETE FROM api_keys WHERE id = $1 AND user_id = $2', [keyId, userId])
 }
 // Resolve a raw agent key → the owning user + pinned account (hash lookup).
 export async function findByApiKey(raw: string): Promise<{ userId: string; accountId: string | null } | null> {
+  if (NO_STORE) return null
   const d = await ready()
   const r = await d.get<{ id: string; user_id: string; account_id: string | null }>('SELECT id,user_id,account_id FROM api_keys WHERE key_hash = $1', [hashKey(raw)])
   if (!r) return null
