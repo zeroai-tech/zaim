@@ -1,6 +1,6 @@
 import { json } from '@/lib/auth'
 import { verifyPassword, makeSession, sessionCookie, clearCookie, userIdFromReq } from '@/lib/session'
-import { findUserByEmail, findUserById, listAccounts } from '@/lib/store'
+import { findUserByEmail, findUserById, listAccounts, audit } from '@/lib/store'
 import { probeImap } from '@/lib/mail'
 import { discover, type MailHosts } from '@/lib/discover'
 import {
@@ -23,6 +23,9 @@ export const maxDuration = 30 // signing in opens a real IMAP connection
 //  The older vault path (a users row + saved third-party mailboxes) is still
 //  honoured underneath so nobody who could sign in yesterday is locked out.
 // ─────────────────────────────────────────────────────────────────────────────
+
+const request_ip = (req: Request) =>
+  (req.headers.get('x-forwarded-for') || '').split(',')[0].trim() || null
 
 const res = (data: unknown, cookies: string[], status = 200) => {
   const h = new Headers({ 'content-type': 'application/json' })
@@ -115,6 +118,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
       // third-party mailboxes and agent keys stay reachable in the same session.
       const u = await findUserByEmail(email).catch(() => undefined)
       if (u) cookies.push(sessionCookie(makeSession(u.id)))
+      // Recorded, never enforced — a failure here must not fail the sign-in.
+      void audit('signin', email, c.label, request_ip(req))
       return res({ ok: true, user: { id: u?.id || MAILBOX_ACCOUNT_ID, email } }, cookies)
     }
     // The password is definitively wrong — trying more hosts can't help, and it
@@ -135,6 +140,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
   }
   // Only a mailbox we know is ours can be told plainly that the password is
   // wrong. For anywhere else, a rejection may just mean we guessed the server.
+  void audit('signin-failed', email, authFailed ? 'wrong password' : 'no mailbox found', request_ip(req))
   return json({
     error: weHostThem
       ? "That email and password didn't work. Use the same password you use for your mailbox."

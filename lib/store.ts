@@ -18,6 +18,20 @@ import { encryptSecret, decryptSecret, type MailAccount } from './config'
 const PG_URL = process.env.POSTGRES_URL || process.env.DATABASE_URL || ''
 const usePg = !!PG_URL
 
+// Cloudflare D1 over its HTTP API. Zaim runs on Vercel, so there is no Workers
+// binding available — the same transport the Cosmopolitan site already uses.
+//
+// This holds only what the mail server cannot: a profile picture, saved
+// third-party mailboxes, preferences, and an audit trail. Credentials for those
+// mailboxes are AES-256-GCM encrypted before they get here, so the database
+// stores ciphertext and never a usable password. Agent access deliberately does
+// NOT live here — those are OAuth tokens the mail server issues, so that
+// revoking one actually ends access rather than only ending it in this app.
+const D1_ACCOUNT = process.env.CLOUDFLARE_ACCOUNT_ID || ''
+const D1_DB = process.env.D1_DATABASE_ID || ''
+const D1_TOKEN = process.env.CLOUDFLARE_API_TOKEN || ''
+const useD1 = !!(D1_ACCOUNT && D1_DB && D1_TOKEN) && !usePg
+
 // Running with no database at all is now the normal case.
 //
 // Signing in and reading mail never touch a store — the mail server is the
@@ -29,7 +43,7 @@ const usePg = !!PG_URL
 // So when neither POSTGRES_URL nor a writable disk is available, every read
 // answers empty and every write is refused with a message that says why,
 // instead of the app crashing on a connection that was never configured.
-const NO_STORE = !PG_URL && !!process.env.VERCEL
+const NO_STORE = !PG_URL && !useD1 && !!process.env.VERCEL
 export const storeAvailable = () => !NO_STORE
 
 type Params = readonly unknown[]
@@ -54,6 +68,15 @@ const SCHEMA = [
      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, label TEXT, key_hash TEXT UNIQUE NOT NULL,
      account_id TEXT, created_at BIGINT NOT NULL, last_used BIGINT)`,
   `CREATE INDEX IF NOT EXISTS idx_keys_hash ON api_keys(key_hash)`,
+  // Preferences follow the person rather than the device, so Zaim looks the
+  // same on a phone as on a desktop.
+  `CREATE TABLE IF NOT EXISTS prefs (
+     user_id TEXT PRIMARY KEY, data TEXT NOT NULL, updated_at BIGINT NOT NULL)`,
+  // Who signed in, from where. Worth having before clients get panel access.
+  `CREATE TABLE IF NOT EXISTS audit (
+     id TEXT PRIMARY KEY, at BIGINT NOT NULL, actor TEXT, action TEXT NOT NULL,
+     detail TEXT, ip TEXT)`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_at ON audit(at)`,
 ]
 
 // Additive, idempotent migrations for databases created before a column existed.
@@ -95,6 +118,32 @@ async function makePg(): Promise<Driver> {
   return d
 }
 
+async function makeD1(): Promise<Driver> {
+  const url = `https://api.cloudflare.com/client/v4/accounts/${D1_ACCOUNT}/d1/database/${D1_DB}/query`
+  // D1 speaks SQLite, which uses ?N placeholders rather than Postgres's $N.
+  const toQ = (sql: string) => sql.replace(/\$(\d+)/g, '?$1')
+  async function run<T>(sql: string, params: readonly unknown[] = []): Promise<T[]> {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${D1_TOKEN}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ sql: toQ(sql), params: params as unknown[] }),
+    })
+    const body = await r.json().catch(() => ({})) as { success?: boolean; errors?: { message: string }[]; result?: { results: T[] }[] }
+    if (!r.ok || !body.success) {
+      throw new Error('D1: ' + (body.errors?.map((e) => e.message).join('; ') || `HTTP ${r.status}`))
+    }
+    return body.result?.[0]?.results ?? []
+  }
+  const d: Driver = {
+    async run(sql, p = []) { await run(sql, p) },
+    async get<T>(sql: string, p: Params = []) { return (await run<T>(sql, p))[0] },
+    async all<T>(sql: string, p: Params = []) { return run<T>(sql, p) },
+  }
+  for (const ddl of SCHEMA) await d.run(ddl)
+  for (const m of MIGRATIONS) { try { await d.run(m) } catch { /* already applied */ } }
+  return d
+}
+
 async function makeSqlite(): Promise<Driver> {
   const { default: Database } = await import('better-sqlite3')
   const db = new Database(process.env.ZAIM_DB_PATH || path.join(process.cwd(), 'zaim.db'))
@@ -113,17 +162,17 @@ async function makeSqlite(): Promise<Driver> {
 let _ready: Promise<Driver> | null = null
 const ready = (): Promise<Driver> => {
   if (NO_STORE) throw new Error('This deployment has no database — mail works without one; profile pictures and saved third-party mailboxes need one.')
-  return (_ready ??= (usePg ? makePg() : makeSqlite()))
+  return (_ready ??= (usePg ? makePg() : useD1 ? makeD1() : makeSqlite()))
 }
 
 const id = () => crypto.randomUUID()
 
 // Diagnostic: confirm the DB is reachable + report which backend is active.
-export async function dbPing(): Promise<{ backend: 'postgres' | 'sqlite' | 'none' }> {
+export async function dbPing(): Promise<{ backend: 'postgres' | 'sqlite' | 'd1' | 'none' }> {
   if (NO_STORE) return { backend: 'none' }
   const d = await ready()
   await d.get('SELECT 1 AS one')
-  return { backend: usePg ? 'postgres' : 'sqlite' } as { backend: 'postgres' | 'sqlite' | 'none' }
+  return { backend: usePg ? 'postgres' : useD1 ? 'd1' : 'sqlite' } as { backend: 'postgres' | 'sqlite' | 'd1' | 'none' }
 }
 
 // ── Users ────────────────────────────────────────────────────────────────────
@@ -296,4 +345,37 @@ export async function findByApiKey(raw: string): Promise<{ userId: string; accou
   if (!r) return null
   await d.run('UPDATE api_keys SET last_used = $1 WHERE id = $2', [Date.now(), r.id])
   return { userId: r.user_id, accountId: r.account_id }
+}
+
+
+// ── Preferences ──────────────────────────────────────────────────────────────
+export async function getPrefs(userId: string): Promise<Record<string, unknown>> {
+  if (NO_STORE) return {}
+  const r = await (await ready()).get<{ data: string }>('SELECT data FROM prefs WHERE user_id = $1', [userId])
+  try { return r ? JSON.parse(r.data) : {} } catch { return {} }
+}
+export async function setPrefs(userId: string, data: Record<string, unknown>): Promise<void> {
+  if (NO_STORE) return
+  const d = await ready()
+  const json = JSON.stringify(data), now = Date.now()
+  // No UPSERT: D1 and Postgres spell it differently, and an update-then-insert
+  // is portable across all three backends.
+  await d.run('UPDATE prefs SET data = $1, updated_at = $2 WHERE user_id = $3', [json, now, userId])
+  const has = await d.get<{ user_id: string }>('SELECT user_id FROM prefs WHERE user_id = $1', [userId])
+  if (!has) await d.run('INSERT INTO prefs (user_id,data,updated_at) VALUES ($1,$2,$3)', [userId, json, now])
+}
+
+// ── Audit trail ──────────────────────────────────────────────────────────────
+// Never throws: a failure to record must not fail the action being recorded.
+export async function audit(action: string, actor?: string | null, detail?: string | null, ip?: string | null): Promise<void> {
+  if (NO_STORE) return
+  try {
+    await (await ready()).run(
+      'INSERT INTO audit (id,at,actor,action,detail,ip) VALUES ($1,$2,$3,$4,$5,$6)',
+      [id(), Date.now(), actor ?? null, action, detail ?? null, ip ?? null])
+  } catch { /* recording is best-effort */ }
+}
+export async function recentAudit(limit = 100): Promise<Record<string, unknown>[]> {
+  if (NO_STORE) return []
+  return (await ready()).all('SELECT * FROM audit ORDER BY at DESC LIMIT $1', [limit])
 }
