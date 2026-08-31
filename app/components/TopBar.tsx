@@ -2,6 +2,13 @@
 import { useState } from 'react'
 import { Account, Avatar, Mark, avatarColor, initials } from '@/lib/client-utils'
 
+// The mail server hosting a mailbox, derived from its address. Its self-service
+// portal is where app passwords are created and the mailbox password changed.
+const mailServerUrl = (email: string) => {
+  const domain = (email.split('@')[1] || '').toLowerCase()
+  return domain ? `https://mail.${domain.replace(/^mail\./, '')}/` : 'https://mail.zeroaitech.tech/'
+}
+
 export function TopBar({
   accounts, activeAccount, activeEmail, activeLabel, email, avatar,
   onSwitchAccount, onAddAccount, onEditAccount,
@@ -81,7 +88,16 @@ export function TopBar({
           <div className="absolute z-50 right-0 top-[42px] w-56 glass rounded-xl p-1.5 shadow-xl fade-in" style={{ border: '1px solid var(--line)' }}>
             <div className="px-2.5 py-2 text-xs text-[color:var(--muted)] truncate">{email}</div>
             <button onClick={() => { setProfMenu(false); onShowProfile() }} className="w-full text-left rounded-lg px-2.5 py-2 text-xs hover:bg-white/5">✎ Edit profile picture</button>
-            <button onClick={() => { setProfMenu(false); onShowKeys() }} className="w-full text-left rounded-lg px-2.5 py-2 text-xs hover:bg-white/5">🔑 Agent keys</button>
+            {/* App passwords live on the mail server, not here: Stalwart lets a
+                mailbox owner create them in its own portal and deliberately does
+                not let anyone — including an administrator — create one on their
+                behalf. So this links there rather than pretending to manage them. */}
+            <a href={mailServerUrl(activeEmail)} target="_blank" rel="noopener noreferrer"
+               onClick={() => setProfMenu(false)}
+               className="block w-full text-left rounded-lg px-2.5 py-2 text-xs hover:bg-white/5">
+              🔐 App passwords &amp; mailbox settings ↗
+            </a>
+            <button onClick={() => { setProfMenu(false); onShowKeys() }} className="w-full text-left rounded-lg px-2.5 py-2 text-xs hover:bg-white/5">🤖 Connect an agent</button>
             <button onClick={onLogout} className="w-full text-left rounded-lg px-2.5 py-2 text-xs text-red-400 hover:bg-white/5">Sign out</button>
           </div>
         )}

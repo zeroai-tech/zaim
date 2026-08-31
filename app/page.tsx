@@ -462,70 +462,6 @@ function EditAccount({ accountId, onClose, onSaved, onDeleted }: { accountId: st
 }
 
 type KeyRow = { id: string; label: string; account_id: string | null; created_at: number; last_used: number | null }
-function Keys({ accounts, onClose }: { accounts: Account[]; onClose: () => void }) {
-  const [keys, setKeys] = useState<KeyRow[]>([])
-  const [label, setLabel] = useState(''); const [acct, setAcct] = useState('')
-  const [fresh, setFresh] = useState<{ label: string; secret: string } | null>(null)
-  const [busy, setBusy] = useState(false); const [copied, setCopied] = useState(false)
-  const reload = useCallback(() => { api('/api/keys').then((r) => setKeys(r.keys || [])) }, [])
-  useEffect(() => { reload() }, [reload])
-  async function mint() {
-    setBusy(true)
-    const r = await api('/api/keys', { method: 'POST', body: JSON.stringify({ label: label || 'Agent key', accountId: acct || undefined }) })
-    setBusy(false)
-    if (r.ok) { setFresh({ label: r.label, secret: r.secret }); setLabel(''); reload() }
-  }
-  async function revoke(id: string) { await api(`/api/keys/${id}`, { method: 'DELETE' }); reload() }
-  return (
-    <div className="fixed inset-0 grid place-items-center bg-black/50 backdrop-blur-sm z-50 p-6" onClick={onClose}>
-      <div className="glass rounded-2xl w-full max-w-lg fade-in" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 h-12" style={{ borderBottom: '1px solid var(--line)' }}>
-          <span className="font-bold text-sm">🔑 Agent keys</span><button onClick={onClose} className="text-[color:var(--muted)] hover:text-white">✕</button>
-        </div>
-        <div className="p-5 flex flex-col gap-4">
-          <p className="text-xs text-[color:var(--muted)] -mt-1">Give Claude Code, Codex or the <code>zaim</code> CLI a key so they can read + send from your mailbox. Each key is shown once — store it safely; revoke anytime.</p>
-          {fresh ? (
-            <div className="rounded-xl p-4" style={{ background: 'var(--panel-2)', border: '1px solid var(--accent)' }}>
-              <div className="text-xs font-semibold mb-2">New key “{fresh.label}” — copy it now, it won’t be shown again:</div>
-              <div className="flex gap-2">
-                <code className="flex-1 text-[11px] break-all bg-black/30 rounded-lg px-3 py-2 leading-relaxed">{fresh.secret}</code>
-                <button onClick={() => { navigator.clipboard?.writeText(fresh.secret); setCopied(true); setTimeout(() => setCopied(false), 1500) }} className="shrink-0 accent-grad text-white text-xs font-bold px-3 rounded-lg">{copied ? '✓' : 'Copy'}</button>
-              </div>
-              <button onClick={() => setFresh(null)} className="text-[11px] text-[color:var(--muted)] hover:text-white mt-3">Done</button>
-            </div>
-          ) : (
-            <div className="flex gap-2">
-              <input className={field + ' flex-1'} style={{ borderColor: 'var(--line)' }} placeholder="Key name (e.g. Claude Code)" value={label} onChange={(e) => setLabel(e.target.value)} />
-              {accounts.length > 1 && (
-                <select className={field + ' flex-1'} style={{ borderColor: 'var(--line)' }} value={acct} onChange={(e) => setAcct(e.target.value)}>
-                  <option value="">Default mailbox</option>
-                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
-                </select>
-              )}
-              <button disabled={busy} onClick={mint} className="accent-grad text-white font-bold rounded-xl px-4 text-sm disabled:opacity-50 shrink-0">{busy ? '…' : 'Generate'}</button>
-            </div>
-          )}
-          <div className="flex flex-col gap-2">
-            {keys.length === 0 && <div className="text-xs text-[color:var(--muted)]">No keys yet.</div>}
-            {keys.map((k) => (
-              <div key={k.id} className="flex items-center gap-3 rounded-lg px-3 py-2" style={{ background: 'var(--panel-2)' }}>
-                <span className="w-7 h-7 rounded-lg grid place-items-center text-xs" style={{ background: 'var(--line)' }}>🔑</span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-xs font-semibold truncate">{k.label}</div>
-                  <div className="text-[10px] text-[color:var(--muted)]">{k.last_used ? `last used ${new Date(k.last_used).toLocaleString()}` : 'never used'}{k.account_id ? '' : ' · default mailbox'}</div>
-                </div>
-                <button onClick={() => revoke(k.id)} className="text-[11px] text-red-400 hover:text-red-300 shrink-0">Revoke</button>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// Resize + center-crop an image file to a small square JPEG data URL (keeps the
-// avatar tiny enough to store inline in the users row).
 async function imageToAvatar(file: File, size = 256): Promise<string> {
   const url = URL.createObjectURL(file)
   try {
@@ -538,6 +474,74 @@ async function imageToAvatar(file: File, size = 256): Promise<string> {
     return canvas.toDataURL('image/jpeg', 0.85)
   } finally { URL.revokeObjectURL(url) }
 }
+
+function Keys({ accounts, onClose }: { accounts: Account[]; onClose: () => void }) {
+  // Agent access used to mean a key minted here and stored in Postgres. There is
+  // no database any more: agents sign in against the mail server itself, so this
+  // screen explains that rather than handing out a credential Zaim would have to
+  // remember. Revoking happens on the mail server, where it also ends IMAP.
+  const [copied, setCopied] = useState('')
+  const email = accounts[0]?.email || 'you@yourdomain.com'
+  const cmd = `zaim login ${email}`
+  const copy = (t: string, k: string) => { navigator.clipboard?.writeText(t); setCopied(k); setTimeout(() => setCopied(''), 1500) }
+  const Step = ({ n, title, children }: { n: number; title: string; children: React.ReactNode }) => (
+    <div className="flex gap-3">
+      <span className="w-6 h-6 shrink-0 rounded-full grid place-items-center text-[11px] font-bold accent-grad text-white">{n}</span>
+      <div className="min-w-0 flex-1"><div className="text-sm font-semibold">{title}</div>{children}</div>
+    </div>
+  )
+  return (
+    <div className="fixed inset-0 grid place-items-center bg-black/50 backdrop-blur-sm z-50 p-4 sm:p-6" onClick={onClose}>
+      <div className="glass rounded-2xl w-full max-w-lg fade-in max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 h-12 sticky top-0" style={{ borderBottom: '1px solid var(--line)', background: 'var(--bg)' }}>
+          <span className="font-bold text-sm">🤖 Connect an agent</span>
+          <button onClick={onClose} className="text-[color:var(--muted)] hover:text-white">✕</button>
+        </div>
+        <div className="p-5 flex flex-col gap-5">
+          <p className="text-xs leading-relaxed" style={{ color: 'var(--muted)' }}>
+            Claude Code, Codex or the <code>zaim</code> CLI can read and send from this mailbox.
+            They sign in to your mail server directly — Zaim never stores a key, and revoking
+            access on the mail server ends it everywhere, including IMAP.
+          </p>
+
+          <Step n={1} title="Install the CLI">
+            <div className="flex gap-2 mt-1.5">
+              <code className="flex-1 text-[11px] break-all bg-black/30 rounded-lg px-3 py-2">npm i -g @zeroai/zaim</code>
+              <button onClick={() => copy('npm i -g @zeroai/zaim', 'i')} className="shrink-0 text-xs font-bold px-3 rounded-lg" style={{ border: '1px solid var(--line)' }}>{copied === 'i' ? '✓' : 'Copy'}</button>
+            </div>
+          </Step>
+
+          <Step n={2} title="Sign in">
+            <div className="flex gap-2 mt-1.5">
+              <code className="flex-1 text-[11px] break-all bg-black/30 rounded-lg px-3 py-2">{cmd}</code>
+              <button onClick={() => copy(cmd, 'c')} className="shrink-0 accent-grad text-white text-xs font-bold px-3 rounded-lg">{copied === 'c' ? '✓' : 'Copy'}</button>
+            </div>
+            <p className="text-[11px] mt-1.5" style={{ color: 'var(--muted)' }}>
+              It prints a short code and a link. Approve it in your browser, once. The agent
+              then renews itself and will not ask again.
+            </p>
+          </Step>
+
+          <Step n={3} title="Point the agent at Zaim">
+            <p className="text-[11px] mt-1" style={{ color: 'var(--muted)' }}>
+              Set <code>ZAIM_URL</code> to this deployment. No key, no password.
+            </p>
+            <div className="flex gap-2 mt-1.5">
+              <code className="flex-1 text-[11px] break-all bg-black/30 rounded-lg px-3 py-2">ZAIM_URL=https://zaim.zeroaitech.tech</code>
+              <button onClick={() => copy('ZAIM_URL=https://zaim.zeroaitech.tech', 'u')} className="shrink-0 text-xs font-bold px-3 rounded-lg" style={{ border: '1px solid var(--line)' }}>{copied === 'u' ? '✓' : 'Copy'}</button>
+            </div>
+          </Step>
+
+          <div className="rounded-xl p-3.5 text-[11px] leading-relaxed" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)', color: 'var(--muted)' }}>
+            For a phone or desktop mail app, create an <b>app password</b> in your mail server&rsquo;s
+            portal instead — it is scoped, expiring, and revocable without touching your main password.
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 
 function ProfileModal({ email, avatar, onClose, onSaved }: { email: string; avatar: string; onClose: () => void; onSaved: (a: string) => void }) {
   const [preview, setPreview] = useState(avatar)
