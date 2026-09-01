@@ -200,7 +200,11 @@ export async function getAttachment(account: MailAccount, uid: number, mailbox =
 }
 
 export interface SendAttachment { filename: string; content: string; encoding?: string; contentType?: string }
-export interface SendInput { to: string; subject: string; html?: string; text?: string; cc?: string; bcc?: string; replyTo?: string; attachments?: SendAttachment[] }
+export interface SendInput { to: string; subject: string; html?: string; text?: string; cc?: string; bcc?: string; replyTo?: string; attachments?: SendAttachment[]
+  // Extra RFC 5322 headers. Bulk sends need List-Unsubscribe here: Gmail and
+  // Yahoo have required it of bulk senders since 2024, and mail without it is
+  // far more likely to be foldered no matter how clean the authentication is.
+  headers?: Record<string, string> }
 
 // Build the full raw MIME once, so the exact same bytes we send can also be
 // saved to the Sent folder.
@@ -212,6 +216,7 @@ export function buildRaw(account: MailAccount, input: SendInput): Promise<Buffer
     replyTo: input.replyTo || replyTo,
     subject: input.subject,
     html: input.html, text: input.text || (input.html ? undefined : ''),
+    headers: input.headers,
     attachments: (input.attachments || []).map((a) => ({
       filename: a.filename, content: a.content, encoding: a.encoding || 'base64', contentType: a.contentType,
     })),
