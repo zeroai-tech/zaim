@@ -483,6 +483,8 @@ function Keys({ accounts, onClose }: { accounts: Account[]; onClose: () => void 
   const [copied, setCopied] = useState('')
   const email = accounts[0]?.email || 'you@yourdomain.com'
   const cmd = `zaim login ${email}`
+  const install = 'npm i -g github:zeroai-tech/zaim'
+  const mcpCmd = 'claude mcp add zaim -s user -e ZAIM_URL=https://zaim.zeroaitech.tech -- zaim-mcp'
   const copy = (t: string, k: string) => { navigator.clipboard?.writeText(t); setCopied(k); setTimeout(() => setCopied(''), 1500) }
   const Step = ({ n, title, children }: { n: number; title: string; children: React.ReactNode }) => (
     <div className="flex gap-3">
@@ -505,16 +507,19 @@ function Keys({ accounts, onClose }: { accounts: Account[]; onClose: () => void 
           </p>
 
           <Step n={1} title="Install the CLI">
+            <p className="text-[11px] mt-1" style={{ color: 'var(--muted)' }}>
+              Installs <code>zaim</code>, <code>zaim-login</code> and <code>zaim-mcp</code>. Takes a minute or two.
+            </p>
             <div className="flex gap-2 mt-1.5">
-              <code className="flex-1 text-[11px] break-all bg-black/30 rounded-lg px-3 py-2">npm i -g @zeroai/zaim</code>
-              <button onClick={() => copy('npm i -g @zeroai/zaim', 'i')} className="shrink-0 text-xs font-bold px-3 rounded-lg" style={{ border: '1px solid var(--line)' }}>{copied === 'i' ? '✓' : 'Copy'}</button>
+              <code className="flex-1 text-[11px] break-all bg-black/30 rounded-lg px-3 py-2">{install}</code>
+              <button onClick={() => copy(install, 'i')} className="shrink-0 text-xs font-bold px-3 rounded-lg" style={{ border: '1px solid var(--line)' }}>{copied === 'i' ? '\u2713' : 'Copy'}</button>
             </div>
           </Step>
 
           <Step n={2} title="Sign in">
             <div className="flex gap-2 mt-1.5">
               <code className="flex-1 text-[11px] break-all bg-black/30 rounded-lg px-3 py-2">{cmd}</code>
-              <button onClick={() => copy(cmd, 'c')} className="shrink-0 accent-grad text-white text-xs font-bold px-3 rounded-lg">{copied === 'c' ? '✓' : 'Copy'}</button>
+              <button onClick={() => copy(cmd, 'c')} className="shrink-0 accent-grad text-white text-xs font-bold px-3 rounded-lg">{copied === 'c' ? '\u2713' : 'Copy'}</button>
             </div>
             <p className="text-[11px] mt-1.5" style={{ color: 'var(--muted)' }}>
               It prints a short code and a link. Approve it in your browser, once. The agent
@@ -522,15 +527,26 @@ function Keys({ accounts, onClose }: { accounts: Account[]; onClose: () => void 
             </p>
           </Step>
 
-          <Step n={3} title="Point the agent at Zaim">
+          <Step n={3} title="Register it with Claude Code">
             <p className="text-[11px] mt-1" style={{ color: 'var(--muted)' }}>
-              Set <code>ZAIM_URL</code> to this deployment. No key, no password.
+              One command. Adds the mailbox tools to every project on this machine.
             </p>
             <div className="flex gap-2 mt-1.5">
-              <code className="flex-1 text-[11px] break-all bg-black/30 rounded-lg px-3 py-2">ZAIM_URL=https://zaim.zeroaitech.tech</code>
-              <button onClick={() => copy('ZAIM_URL=https://zaim.zeroaitech.tech', 'u')} className="shrink-0 text-xs font-bold px-3 rounded-lg" style={{ border: '1px solid var(--line)' }}>{copied === 'u' ? '✓' : 'Copy'}</button>
+              <code className="flex-1 text-[11px] break-all bg-black/30 rounded-lg px-3 py-2">{mcpCmd}</code>
+              <button onClick={() => copy(mcpCmd, 'm')} className="shrink-0 text-xs font-bold px-3 rounded-lg" style={{ border: '1px solid var(--line)' }}>{copied === 'm' ? '\u2713' : 'Copy'}</button>
             </div>
+            <p className="text-[11px] mt-1.5" style={{ color: 'var(--muted)' }}>
+              Check it with <code>claude mcp list</code>. For Codex or another client, run
+              <code> zaim-mcp</code> as a stdio server with the same <code>ZAIM_URL</code>.
+            </p>
           </Step>
+
+          <div className="rounded-xl p-3.5 text-[11px] leading-relaxed" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)', color: 'var(--muted)' }}>
+            Signing in a <b>second</b> mailbox replaces the first, because credentials live in one
+            file. To keep both, point the second at its own store:
+            <code className="block mt-1.5 bg-black/30 rounded-lg px-3 py-2 break-all">ZAIM_CONFIG_DIR=~/.zaim-other zaim login other@yourdomain.com</code>
+            Set the same variable when you run the agent, and it uses that mailbox.
+          </div>
 
           <div className="rounded-xl p-3.5 text-[11px] leading-relaxed" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)', color: 'var(--muted)' }}>
             For a phone or desktop mail app, create an <b>app password</b> in your mail server&rsquo;s
