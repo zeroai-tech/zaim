@@ -72,6 +72,16 @@ function machineEnv() {
   return {
     ...s,
     ZAIM_DB_PATH: path.join(dir, 'zaim.db'),
+    // Which mail server is ours.
+    //
+    // This lives in .env.local, which the build deliberately does not package,
+    // so in the installed app it was simply undefined — and the whole "this
+    // address is one of ours" branch of discovery became dead code. A
+    // zeroaitech.tech mailbox was therefore treated as somebody else's, which
+    // is why signing in asked for IMAP and SMTP details it already knew, and
+    // why a refusal was reported as "check your mail-server details" instead
+    // of naming the real cause.
+    ZAIM_HOSTED_MAIL_HOST: process.env.ZAIM_HOSTED_MAIL_HOST || 'mail.zeroaitech.tech',
     // The cognitive layer stores to SQLite beside the mail vault, so an
     // install needs no Cloudflare credentials and nothing about how the owner
     // writes ever leaves the machine. Setting the D1 variables instead makes

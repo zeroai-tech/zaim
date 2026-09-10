@@ -22,6 +22,11 @@ export function SignInForm({ onDone, autoFocus = false }: { onDone: () => void; 
   })
   const [pw, setPw] = useState('')
   const [err, setErr] = useState('')
+  // What the mail server itself said, and what to do about it. Shown under the
+  // error because "couldn't sign in" alone gave no way to tell a wrong
+  // password from a server that never answered.
+  const [detail, setDetail] = useState('')
+  const [hint, setHint] = useState('')
   const [busy, setBusy] = useState(false)
 
   // Only shown when we genuinely cannot work out where this address's mail
@@ -33,7 +38,7 @@ export function SignInForm({ onDone, autoFocus = false }: { onDone: () => void; 
   const [smtpPort, setSmtpPort] = useState('465')
 
   async function go() {
-    setErr('')
+    setErr(''); setDetail(''); setHint('')
     const em = email.trim().toLowerCase()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) return setErr('Please enter a valid email address.')
     if (!pw) return setErr('Please enter your mailbox password.')
@@ -53,6 +58,7 @@ export function SignInForm({ onDone, autoFocus = false }: { onDone: () => void; 
     if (r.needsMailServer) {
       setBusy(false); setNeedsServer(true)
       setErr(r.error || 'Enter your mail server details to continue.')
+      setDetail(r.detail || ''); setHint(r.hint || '')
       return
     }
 
@@ -63,6 +69,7 @@ export function SignInForm({ onDone, autoFocus = false }: { onDone: () => void; 
     setBusy(false)
     if (me?.user) return onDone()
     setErr(r.error || 'Something went wrong, please try again.')
+    setDetail(r.detail || ''); setHint(r.hint || '')
   }
 
   const field = 'w-full bg-[color:var(--panel-2)] border rounded-xl px-4 py-3 text-sm outline-none focus:border-[color:var(--accent)]'
@@ -101,7 +108,19 @@ export function SignInForm({ onDone, autoFocus = false }: { onDone: () => void; 
         )}
       </div>
 
-      {err && <p className="text-xs text-red-400 mt-3">{err}</p>}
+      {err && (
+        <div className="mt-3 flex flex-col gap-1">
+          <p className="text-xs text-red-400">{err}</p>
+          {detail && (
+            <p className="text-[11px] leading-relaxed font-mono break-words" style={{ color: 'var(--muted)' }}>
+              {detail}
+            </p>
+          )}
+          {hint && (
+            <p className="text-[11px] leading-relaxed" style={{ color: 'var(--muted)' }}>{hint}</p>
+          )}
+        </div>
+      )}
 
       <button
         disabled={busy} onClick={go}

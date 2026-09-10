@@ -99,6 +99,13 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
   // "use your mailbox password" instead of being asked for its mail server.
   const weHostThem = candidates.some((c) => c.hosted && !c.fallback)
   let authFailed = false
+  // What the mail server actually said. Every distinct cause — a rejected
+  // password, a refused connection, an expired certificate, a timeout — used
+  // to arrive as the same one sentence, because the probe's error was read and
+  // then dropped. Neither the person signing in nor anyone reading a log could
+  // tell which had happened.
+  let lastError = ''
+  const tried: string[] = []
   // Each miss costs a connection attempt, so try the few most likely hosts and
   // stop well before the function's own 30s budget rather than 504-ing.
   const deadline = Date.now() + 22_000
@@ -122,6 +129,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
       void audit('signin', email, c.label, request_ip(req))
       return res({ ok: true, user: { id: u?.id || MAILBOX_ACCOUNT_ID, email } }, cookies)
     }
+    tried.push(`${c.imapHost}:${c.imapPort}`)
+    if (probe.error) lastError = probe.error
     // The password is definitively wrong — trying more hosts can't help, and it
     // would keep hammering the server with the same bad credentials.
     if (probe.authFailed) { authFailed = true; break }
@@ -141,13 +150,28 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
   // Only a mailbox we know is ours can be told plainly that the password is
   // wrong. For anywhere else, a rejection may just mean we guessed the server.
   void audit('signin-failed', email, authFailed ? 'wrong password' : 'no mailbox found', request_ip(req))
+  // Goes to the desktop app's log, where it is the only record of why a
+  // sign-in failed. Never includes the password.
+  console.error(
+    `[auth] sign-in failed for ${email} — tried ${tried.join(', ') || 'no host'} — ` +
+    `${authFailed ? 'server rejected the credentials' : 'no successful login'}: ${lastError || 'no reason reported'}`,
+  )
   return json({
-    error: weHostThem
-      ? "That email and password didn't work. Use the same password you use for your mailbox."
-      : manual
-        ? "Couldn't sign in — check the email, password and mail-server details."
-        : "Couldn't sign in to that mailbox. Check the password, or enter your mail server below.",
-    needsMailServer: !weHostThem && !manual,
+    error: authFailed
+      ? 'Your mail server rejected that email and password.'
+      : weHostThem
+        ? "Couldn't sign in to your mailbox."
+        : manual
+          ? "Couldn't sign in — check the email, password and mail-server details."
+          : "Couldn't sign in to that mailbox. Check the password, or enter your mail server below.",
+    // The server's own words, so a wrong password stops looking identical to a
+    // refused connection or a certificate that expired overnight.
+    detail: lastError || undefined,
+    triedHosts: tried.length ? tried : undefined,
+    hint: authFailed
+      ? 'This is the password for the mailbox itself. If your mail server requires an app password for mail clients, create one in its portal and use that here.'
+      : undefined,
+    needsMailServer: !weHostThem && !manual && !authFailed,
     authFailed,
   }, 401)
 }
