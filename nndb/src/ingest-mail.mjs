@@ -23,22 +23,51 @@
 
 import { ImapFlow } from 'imapflow'
 import { simpleParser } from 'mailparser'
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { first, insert, run } from './db.mjs'
 
 const CRED = join(homedir(), '.zaim', 'credentials.json')
 
-function credentials() {
+/**
+ * The CLI's stored token, refreshed if it has expired.
+ *
+ * Failing with "run zaim login" was the wrong answer: a refresh token is
+ * stored precisely so nobody has to. Stalwart is a full OAuth server, so this
+ * is one form POST against the endpoint it advertises. Only a refresh that is
+ * itself rejected is worth interrupting someone for.
+ */
+async function credentials() {
   const c = JSON.parse(readFileSync(CRED, 'utf8'))
   const expires = Number(c.expires_at)
-  // expires_at is milliseconds. A stale token fails as a plain auth error,
-  // which looks identical to a wrong password, so check before connecting.
-  if (Number.isFinite(expires) && expires < Date.now()) {
-    throw new Error(`Zaim token expired ${new Date(expires).toISOString()}. Run: zaim login`)
+  // A minute of headroom: a token that expires mid-fetch fails as a plain auth
+  // error, which is indistinguishable from a wrong password.
+  if (!Number.isFinite(expires) || expires > Date.now() + 60_000) return c
+  if (!c.refresh_token) throw new Error('Zaim token expired and there is no refresh token. Run: zaim login')
+
+  const meta = await fetch(`https://${c.host}/.well-known/oauth-authorization-server`).then((r) => {
+    if (!r.ok) throw new Error(`${c.host} did not answer OAuth discovery (HTTP ${r.status})`)
+    return r.json()
+  })
+  const res = await fetch(meta.token_endpoint, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: 'zaim', refresh_token: c.refresh_token, grant_type: 'refresh_token' }).toString(),
+  })
+  const d = await res.json().catch(() => ({}))
+  if (!res.ok || !d.access_token) {
+    throw new Error(d.error_description || d.error || 'Could not refresh the mail token. Run: zaim login')
   }
-  return c
+
+  const next = {
+    ...c,
+    access_token: d.access_token,
+    refresh_token: d.refresh_token || c.refresh_token,
+    expires_at: Date.now() + (Number(d.expires_in) || 3600) * 1000,
+  }
+  writeFileSync(CRED, JSON.stringify(next, null, 2), { mode: 0o600 })
+  return next
 }
 
 /**
@@ -111,8 +140,8 @@ export async function ingestSentMail({ limit = 400, mailbox = 'Sent Items', imap
           ? { user: imap.user, accessToken: imap.accessToken }
           : { user: imap.user, pass: imap.pass },
       }
-    : (() => {
-        const c = credentials()
+    : await (async () => {
+        const c = await credentials()
         return { host: c.host, port: 993, secure: true, auth: { user: c.email, accessToken: c.access_token } }
       })()
 
