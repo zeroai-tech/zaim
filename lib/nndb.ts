@@ -18,6 +18,13 @@ export type NndbHealth = {
   samples: number
   embeddings: number
   rules: number
+  sentEmails: number
+  storage: 'sqlite' | 'd1'
+  location: string
+  embeddings_ready: boolean
+  /** False on a fresh install: running, but with nothing learned yet. */
+  trained: boolean
+  learning: string | null
 }
 
 export type NndbDraft = {
@@ -79,6 +86,45 @@ export async function nndbDraft(input: {
 export async function nndbSearch(query: string, limit = 5): Promise<NndbHit[]> {
   const { hits } = await call<{ hits: NndbHit[] }>('/search', { query, limit }, 30_000)
   return hits
+}
+
+export type NndbLearnStatus = {
+  running: boolean
+  step: string | null
+  startedAt: number | null
+  finishedAt: number | null
+  result: { seen: number; inserted: number; embedded: number; rules: number } | null
+  error: string | null
+}
+
+export type NndbFact = { claim: string; source_url: string; confidence: number }
+
+export type NndbImap = {
+  host: string; port?: number; secure?: boolean
+  user: string; pass?: string; accessToken?: string
+}
+
+/**
+ * Start the learn cycle, handing over the mailbox the caller is signed in to.
+ *
+ * Without this the ingester falls back to the CLI's own OAuth token file,
+ * which expires on its own schedule: learning failed with "run zaim login" for
+ * someone already signed into the app. The credentials travel over loopback to
+ * a service that already drafts mail as this person, so this widens nothing.
+ */
+export async function nndbLearn(imap?: NndbImap): Promise<{ started: boolean }> {
+  return call<{ started: boolean }>('/learn', { imap: imap ?? null }, 15_000)
+}
+
+export async function nndbLearnStatus(): Promise<NndbLearnStatus> {
+  return call<NndbLearnStatus>('/learn', undefined, 10_000)
+}
+
+/** Sourced facts about a recipient. Slow: it is really searching the web. */
+export async function nndbResearch(recipient: string, hint?: string, force = false) {
+  return call<{ domain: string; cached: boolean; stored?: number; rejected?: number; facts: NndbFact[] }>(
+    '/research', { recipient, hint, force }, 600_000,
+  )
 }
 
 /** A correction is the only thing that moves a rule's weight after ingestion. */

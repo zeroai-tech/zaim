@@ -11,6 +11,7 @@ import { ConversationList } from './components/ConversationList'
 import { ReadingCanvas } from './components/ReadingCanvas'
 import { ContextPanel } from './components/ContextPanel'
 import { AIPanel } from './components/AIPanel'
+import { VoicePanel } from './components/VoicePanel'
 import { Landing } from './components/Landing'
 
 export default function Zaim() {
@@ -289,6 +290,8 @@ export default function Zaim() {
           <ContextPanel sel={sel} messages={messages} />
         </Collapsible>
         <Collapsible open={panelState.ai} width={360} side="right">
+          <VoicePanel onDraft={(subject, html) => setCompose({ to: '', subject, html })} />
+          <div style={{ borderTop: '1px solid var(--line)' }} />
           <AIPanel key={selUid} sel={sel} onDraftReply={(html) => sel && setCompose({ to: sel.from.replace(/.*<|>.*/g, ''), subject: 'Re: ' + sel.subject, html })} onOpenSearchResult={openFromSearch} />
         </Collapsible>
       </div>

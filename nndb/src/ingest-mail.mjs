@@ -7,9 +7,18 @@
  * and careful. Learning email style from prompts would produce something that
  * reads nothing like Lottie writing to a school.
  *
- * Authentication is the OAuth token Stalwart issued to `zaim login`, read from
- * ~/.zaim/credentials.json. No password is guessed against the server: a wrong
- * one bans the IP across every port on that box, SSH included.
+ * Two ways in, and the caller decides.
+ *
+ * The desktop app passes its own signed-in mailbox down, because that is the
+ * session the person is actually using. Reading ~/.zaim/credentials.json
+ * instead meant the app depended on a CLI token that expires on its own
+ * schedule, so learning failed with "run zaim login" for someone who was
+ * plainly already logged in.
+ *
+ * The CLI still falls back to that file, which is right for a terminal.
+ *
+ * Either way no password is ever guessed at the server: a wrong one bans the
+ * IP across every port on that box, SSH included.
  */
 
 import { ImapFlow } from 'imapflow'
@@ -89,15 +98,25 @@ export function isUsableSample(body) {
  * connection open long enough to time out, and losing the connection lost the
  * whole run rather than one message.
  */
-export async function ingestSentMail({ limit = 400, mailbox = 'Sent Items' } = {}) {
-  const c = credentials()
-  const client = new ImapFlow({
-    host: c.host,
-    port: 993,
-    secure: true,
-    auth: { user: c.email, accessToken: c.access_token },
-    logger: false,
-  })
+export async function ingestSentMail({ limit = 400, mailbox = 'Sent Items', imap = null } = {}) {
+  // `imap` comes from the app's own session. Its password may be an OAuth
+  // token, which imapflow needs told about explicitly rather than sent as a
+  // plain LOGIN.
+  const conn = imap
+    ? {
+        host: imap.host,
+        port: imap.port ?? 993,
+        secure: imap.secure !== false,
+        auth: imap.accessToken
+          ? { user: imap.user, accessToken: imap.accessToken }
+          : { user: imap.user, pass: imap.pass },
+      }
+    : (() => {
+        const c = credentials()
+        return { host: c.host, port: 993, secure: true, auth: { user: c.email, accessToken: c.access_token } }
+      })()
+
+  const client = new ImapFlow({ ...conn, logger: false })
 
   await client.connect()
   const stats = { seen: 0, inserted: 0, skipped: 0 }

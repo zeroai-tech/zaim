@@ -52,14 +52,14 @@ async function readBody(req) {
  */
 const learning = { running: false, step: null, started: null, finished: null, result: null, error: null }
 
-async function runLearn({ deriveRules = true } = {}) {
+async function runLearn({ deriveRules = true, imap = null } = {}) {
   learning.running = true
   learning.started = Date.now()
   learning.error = null
   learning.result = null
   try {
     learning.step = 'reading sent mail'
-    const mail = await ingestSentMail()
+    const mail = await ingestSentMail({ imap })
 
     learning.step = 'embedding'
     const rows = await all(`SELECT id, subject, body FROM writing_samples`)
@@ -152,7 +152,9 @@ const routes = {
         status: 503,
       }
     }
-    runLearn({ deriveRules: body?.deriveRules !== false })
+    // The caller supplies the mailbox when it has one, which the desktop app
+    // always does. Without it the ingester falls back to the CLI's token file.
+    runLearn({ deriveRules: body?.deriveRules !== false, imap: body?.imap ?? null })
     return { started: true }
   },
 
