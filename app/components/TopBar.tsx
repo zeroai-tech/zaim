@@ -65,7 +65,7 @@ export function TopBar({
       <div className="hidden md:block flex-1 max-w-xl mx-2">
         <div className="flex items-center gap-2 rounded-xl px-3 h-9" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }}>
           <span className="text-[color:var(--muted)] text-sm">⌕</span>
-          <input value={search} onChange={(e) => onSearch(e.target.value)} placeholder="Search this folder…" className="flex-1 bg-transparent text-sm outline-none placeholder:text-[color:var(--muted)]" />
+          <input id="zaim-search" value={search} onChange={(e) => onSearch(e.target.value)} placeholder="Search this folder…" className="flex-1 bg-transparent text-sm outline-none placeholder:text-[color:var(--muted)]" />
           {search && <button onClick={() => onSearch('')} className="text-[color:var(--muted)] hover:text-white text-xs">✕</button>}
         </div>
       </div>

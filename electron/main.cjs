@@ -1,8 +1,8 @@
 // Zaim desktop shell. Boots the Next.js standalone server locally (so the full
 // secure mail app — IMAP/SMTP, encrypted vault — runs on the device), then opens
 // it in a native window. Secrets + the SQLite vault live in the OS app-data dir.
-const { app, BrowserWindow, shell } = require('electron')
-const { spawn } = require('node:child_process')
+const { app, BrowserWindow, Menu, screen, shell } = require('electron')
+const { spawn, execFileSync } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
 const crypto = require('node:crypto')
@@ -101,11 +101,93 @@ function startNndb(env) {
       nndbChild.stdout.on('data', (d) => process.stdout.write('[nndb] ' + d))
       nndbChild.stderr.on('data', (d) => process.stderr.write('[nndb] ' + d))
       nndbChild.on('error', (e) => console.error('[nndb] failed to start:', e.message))
+      // The mail server's pid was recorded when it spawned; this one only
+      // exists now, and an unrecorded child is exactly the one that orphans.
+      recordChildren([child?.pid, nndbChild.pid])
     })
     init.stderr.on('data', (d) => process.stderr.write('[nndb:init] ' + d))
   } catch (e) {
     console.error('[nndb] not started:', e.message)
   }
+}
+
+/**
+ * Children that outlived a previous run.
+ *
+ * Killing or crashing the app leaves the mail server and the cognitive layer
+ * alive, still holding their ports. The next launch then finds 34117 already
+ * answering and quietly loads *that* server: an older build, with an older
+ * session, and no error anywhere. The window looks right and is wrong, which
+ * is the worst way for this to fail.
+ *
+ * So record what we spawn, and reap it before spawning again.
+ */
+function pidFile() {
+  return path.join(app.getPath('userData'), 'children.json')
+}
+
+function recordChildren(pids) {
+  try { fs.writeFileSync(pidFile(), JSON.stringify(pids.filter(Boolean))) } catch { /* best effort */ }
+}
+
+function portBusy(port) {
+  return new Promise((resolve) => {
+    const req = http.get({ host: '127.0.0.1', port, path: '/', timeout: 700 }, () => { req.destroy(); resolve(true) })
+    req.on('error', () => resolve(false))
+    req.on('timeout', () => { req.destroy(); resolve(false) })
+  })
+}
+
+/**
+ * Is this pid still the child we recorded, or has the number been reused?
+ *
+ * Process ids get recycled, so a stale file could name something else entirely
+ * by now — a browser, a build, someone's editor. Signalling that would be ours
+ * to answer for, so check what the pid is actually running first and only act
+ * on a command line that is one of ours.
+ */
+function looksLikeOurChild(pid) {
+  if (process.platform === 'win32') return false // no cheap equivalent; leave it alone rather than guess
+  let out
+  try {
+    out = execFileSync('ps', ['-p', String(pid), '-o', 'ppid=,command='], { encoding: 'utf8' }).trim()
+  } catch {
+    return false // no such process
+  }
+  if (!out) return false
+  const ppid = Number(out.split(/\s+/)[0])
+  // We are a new process, so any recorded child still alive has outlived the
+  // shell that spawned it and has been reparented to init. A process with a
+  // real parent is somebody else's, whatever its command line says.
+  if (ppid !== 1) return false
+  // Next renames its own process title, so the recorded pid does not show the
+  // path we spawned — it reads "next-server (v15.5.20)". Matching only on the
+  // path we passed to spawn silently skips the one child that holds the port.
+  return out.includes(SERVER) || out.includes(NNDB_SERVER) || /\bnext-server\b/.test(out)
+}
+
+async function reapOrphans() {
+  let pids = []
+  try { pids = JSON.parse(fs.readFileSync(pidFile(), 'utf8')) } catch { /* nothing recorded */ }
+  if (!pids.length) return
+
+  // Nothing is holding the ports, so there is nothing to reap and no reason to
+  // signal anyone.
+  if (!(await portBusy(PORT)) && !(await portBusy(NNDB_PORT))) { recordChildren([]); return }
+
+  let signalled = false
+  for (const pid of pids) {
+    if (!looksLikeOurChild(pid)) continue
+    try { process.kill(pid, 'SIGTERM'); signalled = true } catch { /* already gone */ }
+  }
+  recordChildren([])
+  if (!signalled) return
+
+  for (let i = 0; i < 20; i++) {
+    if (!(await portBusy(PORT))) return
+    await new Promise((r) => setTimeout(r, 250))
+  }
+  console.error(`[zaim] port ${PORT} is still held after asking the previous server to stop.`)
 }
 
 function startServer() {
@@ -123,33 +205,214 @@ function startServer() {
   child = spawn(process.execPath, [SERVER], { env, cwd: STANDALONE })
   child.stdout.on('data', (d) => process.stdout.write('[zaim] ' + d))
   child.stderr.on('data', (d) => process.stderr.write('[zaim] ' + d))
+  recordChildren([child.pid, nndbChild?.pid])
 }
 
 function whenReady(cb, tries = 0) {
   http.get(`http://127.0.0.1:${PORT}/`, () => cb()).on('error', () => (tries < 80 ? setTimeout(() => whenReady(cb, tries + 1), 250) : cb()))
 }
 
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1320, height: 860, minWidth: 900, minHeight: 600,
-    backgroundColor: '#08090d', title: 'Zaim', autoHideMenuBar: true,
-    webPreferences: { contextIsolation: true },
-  })
-  win.loadURL(`http://127.0.0.1:${PORT}`)
-  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: 'deny' } })
+/**
+ * Where the window was last time.
+ *
+ * A website opens wherever the browser puts it; an application comes back the
+ * size and place its owner left it. Stored beside the vault, and validated
+ * against the displays actually attached, because a window restored onto a
+ * monitor that has since been unplugged opens off-screen and looks like a
+ * launch that did nothing.
+ */
+function windowStateFile() {
+  return path.join(app.getPath('userData'), 'window-state.json')
 }
 
-app.whenReady().then(() => {
-  if (!fs.existsSync(SERVER)) {
-    console.error(`[zaim] standalone server not found at ${SERVER}. The build is incomplete.`)
+function loadWindowState() {
+  const fallback = { width: 1320, height: 860 }
+  let s
+  try { s = JSON.parse(fs.readFileSync(windowStateFile(), 'utf8')) } catch { return fallback }
+  if (!Number.isFinite(s.width) || !Number.isFinite(s.height)) return fallback
+  const size = { width: Math.max(900, s.width), height: Math.max(600, s.height) }
+  if (!Number.isFinite(s.x) || !Number.isFinite(s.y)) return { ...size, maximised: !!s.maximised }
+  // Keep it only if the saved corner still lands inside some display's work area.
+  const onScreen = screen.getAllDisplays().some(({ workArea: w }) =>
+    s.x >= w.x - 40 && s.y >= w.y - 40 &&
+    s.x + 80 <= w.x + w.width && s.y + 40 <= w.y + w.height)
+  return onScreen ? { ...size, x: s.x, y: s.y, maximised: !!s.maximised } : { ...size, maximised: !!s.maximised }
+}
+
+function trackWindowState(win) {
+  const save = () => {
+    // getNormalBounds is the un-maximised geometry, so un-maximising later
+    // restores a real window rather than a full-screen-sized one.
+    const b = win.getNormalBounds()
+    try {
+      fs.writeFileSync(windowStateFile(), JSON.stringify({ ...b, maximised: win.isMaximized() }))
+    } catch { /* losing the geometry is not worth interrupting a quit */ }
   }
-  stageAssets()
-  startServer()
-  whenReady(createWindow)
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
-})
+  let t = null
+  const debounced = () => { clearTimeout(t); t = setTimeout(save, 400) }
+  for (const ev of ['resize', 'move', 'maximize', 'unmaximize']) win.on(ev, debounced)
+  win.on('close', () => { clearTimeout(t); save() })
+}
+
+/** Run a command in the page. Menu items drive the app, not the browser. */
+function toRenderer(action) {
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  if (!win) return
+  win.webContents.executeJavaScript(
+    `window.dispatchEvent(new CustomEvent('zaim:menu', { detail: ${JSON.stringify(action)} }))`,
+  ).catch(() => { /* page still loading */ })
+}
+
+/**
+ * The application menu.
+ *
+ * Electron's default menu is a browser's: its Help item opens electronjs.org
+ * and its View menu offers Reload and Force Reload, which is the giveaway that
+ * a window is really a web page. This one names things this app does. The Edit
+ * roles are not decoration — without them Cmd+C and Cmd+V do nothing at all on
+ * macOS.
+ */
+function buildMenu() {
+  const mac = process.platform === 'darwin'
+  const item = (label, accelerator, action) => ({ label, accelerator, click: () => toRenderer(action) })
+
+  const template = [
+    ...(mac ? [{
+      label: 'Zaim',
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        item('Settings…', 'CmdOrCtrl+,', 'profile'),
+        { type: 'separator' },
+        { role: 'services' }, { type: 'separator' },
+        { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' },
+        { type: 'separator' }, { role: 'quit' },
+      ],
+    }] : []),
+    {
+      label: 'File',
+      submenu: [
+        item('New Message', 'CmdOrCtrl+N', 'compose'),
+        { type: 'separator' },
+        item('Connect an Agent…', undefined, 'keys'),
+        ...(mac ? [] : [{ type: 'separator' }, item('Settings…', 'CmdOrCtrl+,', 'profile')]),
+        { type: 'separator' },
+        mac ? { role: 'close' } : { role: 'quit' },
+      ],
+    },
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' },
+        ...(mac ? [{ role: 'pasteAndMatchStyle' }] : []),
+        { role: 'selectAll' },
+        { type: 'separator' },
+        item('Find in Mailbox', 'CmdOrCtrl+F', 'search'),
+      ],
+    },
+    {
+      label: 'Mailbox',
+      submenu: [
+        item('Refresh', 'CmdOrCtrl+R', 'refresh'),
+        { type: 'separator' },
+        item('Show Folders', 'CmdOrCtrl+1', 'panel:spaces'),
+        item('Show Details', 'CmdOrCtrl+2', 'panel:context'),
+        item('Show Assistant', 'CmdOrCtrl+3', 'panel:ai'),
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+        { type: 'separator' },
+        // Kept, but out of the way: Cmd+R belongs to the mailbox here, and
+        // these are for when the window itself is wedged.
+        { label: 'Reload Window', accelerator: 'CmdOrCtrl+Shift+R', role: 'forceReload' },
+        { label: 'Developer Tools', accelerator: mac ? 'Alt+Cmd+I' : 'Ctrl+Shift+I', role: 'toggleDevTools' },
+      ],
+    },
+    {
+      label: 'Window',
+      submenu: mac
+        ? [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }]
+        : [{ role: 'minimize' }, { role: 'close' }],
+    },
+  ]
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template))
+}
+
+function createWindow() {
+  const state = loadWindowState()
+  const win = new BrowserWindow({
+    width: state.width, height: state.height,
+    ...(Number.isFinite(state.x) ? { x: state.x, y: state.y } : {}),
+    minWidth: 900, minHeight: 600,
+    backgroundColor: '#08090d', title: 'Zaim',
+    // Do not paint an empty window while the local server is still starting.
+    show: false,
+    webPreferences: { contextIsolation: true },
+  })
+  if (state.maximised) win.maximize()
+  win.once('ready-to-show', () => win.show())
+  trackWindowState(win)
+
+  // The page's <title> is the website's, tagline and all. In a window with a
+  // real title bar that reads as a browser tab, so the app keeps its own name.
+  win.on('page-title-updated', (e) => e.preventDefault())
+
+  win.loadURL(`http://127.0.0.1:${PORT}`)
+
+  // Anything outside the local server opens in the real browser. Without this
+  // a stray link navigates the whole application to a web page, and there is
+  // no back button in a window with no browser chrome.
+  const isLocal = (url) => { try { return new URL(url).host === `127.0.0.1:${PORT}` } catch { return false } }
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:/.test(url)) shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  win.webContents.on('will-navigate', (e, url) => {
+    if (isLocal(url)) return
+    e.preventDefault()
+    if (/^https?:/.test(url)) shell.openExternal(url)
+  })
+}
+
+// One copy of a desktop application, not one per launch. A second launch
+// raises the window that is already open, the way every other app on the
+// machine behaves — and it cannot fight the first one for port 34117.
+if (!app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (!win) return
+    if (win.isMinimized()) win.restore()
+    win.focus()
+  })
+
+  app.whenReady().then(async () => {
+    if (!fs.existsSync(SERVER)) {
+      console.error(`[zaim] standalone server not found at ${SERVER}. The build is incomplete.`)
+    }
+    stageAssets()
+    buildMenu()
+    await reapOrphans()
+    startServer()
+    whenReady(createWindow)
+    app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
+  })
+}
 function stopChildren() {
   for (const c of [child, nndbChild]) { try { c && c.kill() } catch { /* already gone */ } }
 }
 app.on('window-all-closed', () => { stopChildren(); if (process.platform !== 'darwin') app.quit() })
 app.on('quit', stopChildren)
+// A terminal Ctrl+C or a `kill` reaches the shell but not its children, and the
+// pair left behind is what holds the ports next time.
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
+  process.on(sig, () => { stopChildren(); app.quit() })
+}

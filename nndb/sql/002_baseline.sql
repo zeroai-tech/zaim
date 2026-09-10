@@ -38,3 +38,24 @@ INSERT OR IGNORE INTO intent_models (goal, horizon, priority, success_looks_like
   ('Land pilots in 10 to 20 schools per ministry or network', 'quarter', 9, 'a signed pilot or a named focal person at a ministry'),
   ('Raise 500k across pilots, patrons and grants', 'year', 8, 'committed investment, framed as investment not debt'),
   ('Get ZeroAI Studio in front of investors', 'quarter', 8, 'a polished offline and legacy product with credible branding');
+
+-- Writing rules that are asserted rather than measured.
+--
+-- The em dash rule cannot be derived: 28.7% of the sent corpus contains one,
+-- so counting says Lottie uses them. It is a stated preference that postdates
+-- most of that corpus, which is exactly the kind of rule measurement cannot
+-- find. Recorded here as asserted, with the conflict noted, rather than
+-- quietly forced into the derivation where it would look measured.
+INSERT OR IGNORE INTO writing_style (kind, scope, rule, rationale, confidence) VALUES
+  ('hard', 'email',
+   'Never use an em dash. Use a comma, a full stop, or a colon.',
+   'Operator-asserted, not measured: 28.7% of the existing sent corpus contains one, so this rule postdates that writing.',
+   0.99),
+  ('hard', 'email',
+   'Never state a URL, download link, trial length, licence term or account requirement that is not given to you as a fact. Refer to the website only as zeroaitech.tech.',
+   'A draft invented zeroaitech.tech/download and a thirty day no-account trial. The site answers every path with the same page, so the link looked live and led nowhere.',
+   0.99),
+  ('hard', 'email',
+   'Never invent a named programme, policy, department, job title or date for the recipient. Use only researched facts about them.',
+   'Recipient specifics are where a model is most confidently wrong, and the reader is the one organisation certain to notice.',
+   0.99);

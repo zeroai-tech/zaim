@@ -143,6 +143,33 @@ export default function Zaim() {
   
   useEffect(() => { if (phase === 'app') load() }, [phase, activeAccount, activeFolder, activeMailbox])
 
+  // Commands from the native menu bar (New Message, Refresh, Find, panels).
+  //
+  // The menu dispatches a DOM event rather than talking over IPC, which keeps
+  // the preload surface at nothing: the shell can already run script in this
+  // page, so a bridge would add reach without adding capability.
+  useEffect(() => {
+    if (phase !== 'app') return
+    function onMenu(e: Event) {
+      const action = (e as CustomEvent<string>).detail
+      if (action === 'compose') { setCompose({ to: '', subject: '' }); showReader(); return }
+      if (action === 'refresh') { load(); return }
+      if (action === 'keys') { setShowKeys(true); return }
+      if (action === 'profile') { setShowProfile(true); return }
+      if (action === 'search') {
+        const el = document.getElementById('zaim-search') as HTMLInputElement | null
+        el?.focus(); el?.select()
+        return
+      }
+      if (action.startsWith('panel:')) {
+        const p = action.slice(6) as 'spaces' | 'context' | 'ai'
+        setPanelState((st) => ({ ...st, [p]: !st[p] }))
+      }
+    }
+    window.addEventListener('zaim:menu', onMenu)
+    return () => window.removeEventListener('zaim:menu', onMenu)
+  }, [phase, load])
+
   async function open(uid: number) {
     setSelUid(uid); setSel(null)
     const f = folders.find((x) => x.key === activeFolder)

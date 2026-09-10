@@ -205,6 +205,22 @@ export async function validateDraft(text) {
   // this system exists to replace.
   if (/\*\w|\*\*|^#{1,6}\s/m.test(text)) problems.push('contains markdown formatting')
 
+  // Any URL beyond the bare domain has to come from a fact. A draft invented
+  // a download page with trial terms; the site answers every path with the
+  // same shell, so the link returned 200 and showed the homepage. Checking
+  // that a URL resolves proves nothing here, so the rule is that a path must
+  // have been supplied rather than composed.
+  const allowed = new Set(
+    (await all(`SELECT source_url FROM facts WHERE source_url IS NOT NULL`))
+      .map((r) => String(r.source_url)),
+  )
+  for (const url of text.match(/\bhttps?:\/\/[^\s<>()]+|\b[a-z0-9-]+\.(?:tech|com|org|net|gov|edu)(?:\.[a-z]{2})?\/[^\s<>()]+/gi) ?? []) {
+    const clean = url.replace(/[.,;:]$/, '')
+    if (allowed.has(clean)) continue
+    if (/^https?:\/\/zeroaitech\.tech\/?$/i.test(clean)) continue
+    problems.push(`states an unsourced link: ${clean}`)
+  }
+
   for (const b of banned) {
     const claim = b.replace(/^Never claim:\s*/, '').split('—')[0].trim()
     if (claim.length > 6 && text.toLowerCase().includes(claim.toLowerCase())) {
