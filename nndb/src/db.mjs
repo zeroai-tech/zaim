@@ -103,24 +103,57 @@ export async function insert(sql, params = []) {
  */
 export async function migrate(path) {
   const raw = readFileSync(path, 'utf8')
-  const cleaned = raw
-    .split('\n')
-    .map((line) => {
-      let inStr = false
-      for (let i = 0; i < line.length; i++) {
-        if (line[i] === "'") inStr = !inStr
-        if (!inStr && line[i] === '-' && line[i + 1] === '-') return line.slice(0, i)
-      }
-      return line
-    })
-    .join('\n')
-
-  const stmts = cleaned.split(';').map((s) => s.trim()).filter(Boolean)
   const results = { ok: 0, failed: [] }
-  for (const s of stmts) {
-    try { await q(s); results.ok++ } catch (e) { results.failed.push({ sql: s.slice(0, 80), error: e.message }) }
+  for (const stmt of splitStatements(raw)) {
+    try { await q(stmt); results.ok++ }
+    catch (e) { results.failed.push({ sql: stmt.slice(0, 80).replace(/\s+/g, ' '), error: e.message }) }
   }
   return results
+}
+
+/**
+ * Split a .sql file into statements, respecting string literals and comments.
+ *
+ * Both naive approaches have already broken here. Splitting on ";" cut a
+ * statement in half at a semicolon inside quoted text, and the halves failed
+ * with errors pointing nowhere near the real problem. Stripping comments
+ * without tracking strings would corrupt any literal containing two hyphens.
+ *
+ * So this walks the file once: inside a string, nothing is a delimiter and
+ * nothing starts a comment; a doubled quote is an escaped quote and does not
+ * end the string.
+ */
+export function splitStatements(sql) {
+  const out = []
+  let buf = ''
+  let inStr = false
+  let inLineComment = false
+  let inBlockComment = false
+
+  for (let i = 0; i < sql.length; i++) {
+    const c = sql[i]
+    const next = sql[i + 1]
+
+    if (inLineComment) { if (c === '\n') { inLineComment = false; buf += c } continue }
+    if (inBlockComment) { if (c === '*' && next === '/') { inBlockComment = false; i++ } continue }
+
+    if (inStr) {
+      buf += c
+      if (c === "'") {
+        // A doubled quote is an escaped quote, not the end of the string.
+        if (next === "'") { buf += next; i++ } else inStr = false
+      }
+      continue
+    }
+
+    if (c === '-' && next === '-') { inLineComment = true; i++; continue }
+    if (c === '/' && next === '*') { inBlockComment = true; i++; continue }
+    if (c === "'") { inStr = true; buf += c; continue }
+    if (c === ';') { if (buf.trim()) out.push(buf.trim()); buf = ''; continue }
+    buf += c
+  }
+  if (buf.trim()) out.push(buf.trim())
+  return out
 }
 
 /* ------------------------------------------------------------- vectors -- */

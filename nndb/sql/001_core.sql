@@ -85,8 +85,15 @@ CREATE TABLE IF NOT EXISTS facts (
   valid_from    INTEGER,
   valid_until   INTEGER,
   created_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+  -- Facts about a recipient hang off that organisation, and every researched
+  -- one carries the page it was read from. A claim about somebody else's
+  -- policy has to be checkable before it is sent to them.
+  entity_id     INTEGER REFERENCES entities(id) ON DELETE CASCADE,
+  source_url    TEXT,
+  researched_at INTEGER,
   UNIQUE (subject, claim)
 );
+CREATE INDEX IF NOT EXISTS idx_facts_entity ON facts(entity_id);
 
 CREATE TABLE IF NOT EXISTS entities (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,6 +168,10 @@ CREATE TABLE IF NOT EXISTS writing_samples (
   words         INTEGER NOT NULL DEFAULT 0,
   occurred_at   INTEGER,
   created_at    INTEGER NOT NULL DEFAULT (unixepoch()),
+  -- Not every sent email is worth imitating. Earlier sends were generated and
+  -- pasted, and they carry markdown artefacts and claims since retracted, so
+  -- style derivation reads only the high-quality end of the corpus.
+  quality       REAL NOT NULL DEFAULT 1.0,
   UNIQUE (source_kind, external_ref)
 );
 CREATE INDEX IF NOT EXISTS idx_samples_kind ON writing_samples(source_kind, occurred_at DESC);
