@@ -56,6 +56,7 @@
     "asar": false,
     "files": [
       "electron/**",
+      "nndb/**",
       ".next/standalone/**",
       "package.json",
       "!**/*.map"
@@ -110,6 +111,9 @@
       ],
       "icon": "build/icon.png"
     },
-    "publish": null
+    "publish": null,
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**"
+    ]
   }
 }
