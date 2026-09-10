@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api, field, Mark } from '@/lib/client-utils'
+import { SignInForm } from './SignIn'
 
 const REL = 'https://github.com/zeroai-tech/zaim/releases/download/desktop-latest'
 
@@ -319,70 +320,23 @@ zaim send --to ceo@acme.com \\
   )
 }
 
+// The website's sign-in: the same form as the desktop app's, shown over the
+// landing page rather than filling the window. It used to be a second copy of
+// the logic, which meant a fix to one shell silently missed the other.
 function AuthModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
-  // ZaiPanel links here as `?email=someone@domain` when an admin opens a mailbox
-  // — Zaim is that server's mail client, the way cPanel opens RoundCube. Only the
-  // address is passed; the person still types their own mailbox password, so the
-  // panel never handles anyone's credentials.
-  const [email, setEmail] = useState(() => {
-    if (typeof window === 'undefined') return ''
-    const q = new URLSearchParams(window.location.search).get('email') || ''
-    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(q) ? q.toLowerCase() : ''
-  })
-  const [pw, setPw] = useState(''); const [err, setErr] = useState(''); const [busy, setBusy] = useState(false)
-  // Only shown if we genuinely can't work out where this address's mail lives —
-  // never for a mailbox on our own server.
-  const [needsServer, setNeedsServer] = useState(false)
-  const [imapHost, setImapHost] = useState(''); const [imapPort, setImapPort] = useState('993')
-  const [smtpHost, setSmtpHost] = useState(''); const [smtpPort, setSmtpPort] = useState('465')
-
-  async function go() {
-    setErr('')
-    const em = email.trim().toLowerCase()
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) return setErr('Please enter a valid email address.')
-    if (!pw) return setErr('Please enter your mailbox password.')
-    if (needsServer && !imapHost.trim()) return setErr('Enter your incoming (IMAP) mail server.')
-    setBusy(true)
-    const payload: Record<string, unknown> = { email: em, password: pw }
-    if (needsServer)
-      Object.assign(payload, { imapHost: imapHost.trim(), imapPort: +imapPort || 993, smtpHost: smtpHost.trim() || undefined, smtpPort: +smtpPort || 465 })
-    const r = await api('/api/auth/login', { method: 'POST', body: JSON.stringify(payload) })
-    if (r.ok) { setBusy(false); return onDone() }
-    if (r.needsMailServer) { setBusy(false); setNeedsServer(true); setErr(r.error || 'Enter your mail server details to continue.'); return }
-    // A slow cold start can time the response out after the cookie was already
-    // set — re-check before showing a failure so a real sign-in isn't reported
-    // as a wrong password.
-    const me = await api('/api/auth/me')
-    setBusy(false)
-    if (me?.user) return onDone()
-    setErr(r.error || 'Something went wrong — please try again.')
-  }
-  const smallField = { borderColor: 'var(--line)' as const }
   return (
     <div className="fixed inset-0 grid place-items-center bg-black/60 backdrop-blur-sm z-50 p-6" onClick={onClose}>
       <div className="glass rounded-2xl p-8 w-full max-w-sm fade-in" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2 mb-6"><Mark /><span className="font-extrabold text-lg tracking-tight">Zaim</span><button onClick={onClose} className="ml-auto text-[color:var(--muted)] hover:text-white">✕</button></div>
-        <h1 className="text-xl font-bold">Sign in to your mailbox</h1>
-        <p className="text-sm text-[color:var(--muted)] mt-1 mb-5">Use your email address and its password — the same ones your mail server already knows. There is nothing to sign up for.</p>
-        <div className="flex flex-col gap-3">
-          <input className={field} style={smallField} placeholder="you@yourdomain.com" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !busy && go()} />
-          <input className={field} style={smallField} type="password" placeholder="mailbox password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && !busy && !needsServer && go()} />
-          {needsServer && (
-            <div className="flex flex-col gap-2 pt-1 fade-in">
-              <p className="text-xs" style={{ color: 'var(--muted)' }}>Your mail server (from your email provider):</p>
-              <div className="flex gap-2">
-                <input className={field} style={{ ...smallField, flex: 3 }} placeholder="imap.provider.com" value={imapHost} onChange={(e) => setImapHost(e.target.value)} />
-                <input className={field} style={{ ...smallField, flex: 1, minWidth: 0 }} placeholder="993" value={imapPort} onChange={(e) => setImapPort(e.target.value)} />
-              </div>
-              <div className="flex gap-2">
-                <input className={field} style={{ ...smallField, flex: 3 }} placeholder="smtp.provider.com (optional)" value={smtpHost} onChange={(e) => setSmtpHost(e.target.value)} />
-                <input className={field} style={{ ...smallField, flex: 1, minWidth: 0 }} placeholder="465" value={smtpPort} onChange={(e) => setSmtpPort(e.target.value)} />
-              </div>
-            </div>
-          )}
+        <div className="flex items-center gap-2 mb-6">
+          <Mark /><span className="font-extrabold text-lg tracking-tight">Zaim</span>
+          <button onClick={onClose} className="ml-auto text-[color:var(--muted)] hover:text-white">✕</button>
         </div>
-        {err && <p className="text-xs text-red-400 mt-2">{err}</p>}
-        <button disabled={busy} onClick={go} className="accent-grad text-white font-bold rounded-xl py-3 w-full mt-4 hover:opacity-90 disabled:opacity-50">{busy ? 'Checking your mailbox…' : 'Sign in'}</button>
+        <h1 className="text-xl font-bold">Sign in to your mailbox</h1>
+        <p className="text-sm text-[color:var(--muted)] mt-1 mb-5">
+          Use your email address and its password, the same ones your mail server already
+          knows. There is nothing to sign up for.
+        </p>
+        <SignInForm onDone={onDone} />
         <p className="text-[11px] text-[color:var(--muted)] mt-4 text-center leading-relaxed">
           Forgot your password? Your mail administrator can reset it for you.
         </p>

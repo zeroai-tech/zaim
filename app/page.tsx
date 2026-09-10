@@ -13,9 +13,15 @@ import { ContextPanel } from './components/ContextPanel'
 import { AIPanel } from './components/AIPanel'
 import { VoicePanel } from './components/VoicePanel'
 import { Landing } from './components/Landing'
+import { DesktopSignIn } from './components/SignIn'
+import { isDesktop } from '@/lib/platform'
 
 export default function Zaim() {
   const [phase, setPhase] = useState<'loading' | 'auth' | 'add-account' | 'app'>('loading')
+  // Resolved after mount: the server has no user agent, and guessing wrong on
+  // the server would hydrate the wrong shell.
+  const [desktop, setDesktop] = useState(false)
+  useEffect(() => { setDesktop(isDesktop()) }, [])
   const [authOpen, setAuthOpen] = useState(true)
   const [email, setEmail] = useState('')
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -208,8 +214,15 @@ export default function Zaim() {
   function togglePanel(p: 'spaces' | 'context' | 'ai') { setPanelState((s) => ({ ...s, [p]: !s[p] })) }
   function selectFolder(key: string) { setSearch(''); setActiveFolder(key) }
 
-  if (phase === 'loading') return <Splash />
-  if (phase === 'auth') return <Landing onSignIn={() => setAuthOpen(true)} onStart={() => setAuthOpen(true)} authOpen={authOpen} closeAuth={() => setAuthOpen(false)} onDone={refreshMe} />
+  if (phase === 'loading') return <Splash desktop={desktop} />
+  // The desktop app opens straight into sign-in. Showing the website here
+  // meant an installed application greeted its owner with a hero, a feature
+  // grid and a Download button pointing at the thing they were already running.
+  if (phase === 'auth') {
+    return desktop
+      ? <DesktopSignIn onDone={refreshMe} />
+      : <Landing onSignIn={() => setAuthOpen(true)} onStart={() => setAuthOpen(true)} authOpen={authOpen} closeAuth={() => setAuthOpen(false)} onDone={refreshMe} />
+  }
   if (phase === 'add-account') return <AddAccount onDone={refreshMe} email={email} canCancel={accounts.length > 0} onCancel={() => setPhase('app')} />
 
   const active = accounts.find((a) => a.id === activeAccount)
@@ -343,7 +356,32 @@ export default function Zaim() {
   )
 }
 
-function Splash() { return <div className="h-screen grid place-items-center"><div className="flex items-center gap-3 opacity-70"><Mark /><span className="font-extrabold text-lg">Zaim</span></div></div> }
+/**
+ * The boot screen.
+ *
+ * On the web this is gone in a blink. In the desktop app it covers a real
+ * wait: Electron starts a local server and the window opens before it is
+ * listening, so the honest thing is to say what is happening rather than sit
+ * on a logo and let it read as a hang. The line only appears after a second,
+ * so a fast start still just flashes the mark.
+ */
+function Splash({ desktop }: { desktop?: boolean }) {
+  const [slow, setSlow] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setSlow(true), 1000)
+    return () => clearTimeout(t)
+  }, [])
+  return (
+    <div className="h-screen grid place-items-center" style={{ background: 'var(--bg)' }}>
+      <div className="flex flex-col items-center gap-3">
+        <div className="flex items-center gap-3 opacity-70"><Mark /><span className="font-extrabold text-lg">Zaim</span></div>
+        {slow && desktop && (
+          <p className="text-[11px] fade-in" style={{ color: 'var(--muted)' }}>Starting your local mail server</p>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function AddAccount({ onDone, email, canCancel, onCancel }: { onDone: () => void; email: string; canCancel?: boolean; onCancel?: () => void }) {
   const [f, setF] = useState({ label: '', imapHost: '', imapUser: email, imapPass: '', imapPort: '993' })
