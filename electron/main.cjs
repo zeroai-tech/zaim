@@ -11,8 +11,30 @@ const http = require('node:http')
 // main.cjs lives at <root>/electron/main.cjs in both dev and the packaged app
 // (electron-builder places app files under Resources/app/), so root is one up.
 const ROOT = path.join(__dirname, '..')
-const STANDALONE = path.join(ROOT, '.next', 'standalone')
-const SERVER = path.join(STANDALONE, 'server.js')
+/**
+ * Find the standalone server rather than assuming where Next put it.
+ *
+ * Next nests the standalone output under a subdirectory named after the
+ * package when it infers a workspace root above the project, which it does
+ * here because there is a stray package-lock.json in the parent directory.
+ * The result is .next/standalone/zaim/server.js, and hardcoding
+ * .next/standalone/server.js means the mail server never starts and the
+ * window opens on nothing.
+ */
+const STANDALONE_BASE = path.join(ROOT, '.next', 'standalone')
+function findStandalone() {
+  const direct = path.join(STANDALONE_BASE, 'server.js')
+  if (fs.existsSync(direct)) return { dir: STANDALONE_BASE, server: direct }
+  try {
+    for (const entry of fs.readdirSync(STANDALONE_BASE, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const nested = path.join(STANDALONE_BASE, entry.name, 'server.js')
+      if (fs.existsSync(nested)) return { dir: path.join(STANDALONE_BASE, entry.name), server: nested }
+    }
+  } catch { /* base missing entirely; reported below */ }
+  return { dir: STANDALONE_BASE, server: direct }
+}
+const { dir: STANDALONE, server: SERVER } = findStandalone()
 const NNDB_SERVER = path.join(ROOT, 'nndb', 'src', 'serve.mjs')
 const NNDB_INIT = path.join(ROOT, 'nndb', 'bin', 'init-db.mjs')
 const PORT = 34117
@@ -27,6 +49,8 @@ function stageAssets() {
   const pairs = [
     [path.join(ROOT, '.next', 'static'), path.join(STANDALONE, '.next', 'static')],
     [path.join(ROOT, 'public'), path.join(STANDALONE, 'public')],
+    // STANDALONE is resolved above, so these land beside the real server even
+    // when Next nested it a directory deeper.
   ]
   for (const [src, dst] of pairs) {
     if (fs.existsSync(src) && !fs.existsSync(dst)) fs.cpSync(src, dst, { recursive: true })
@@ -116,6 +140,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (!fs.existsSync(SERVER)) {
+    console.error(`[zaim] standalone server not found at ${SERVER}. The build is incomplete.`)
+  }
   stageAssets()
   startServer()
   whenReady(createWindow)
