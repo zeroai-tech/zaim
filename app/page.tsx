@@ -412,12 +412,28 @@ function Splash({ desktop }: { desktop?: boolean }) {
 
 function AddAccount({ onDone, email, canCancel, onCancel }: { onDone: () => void; email: string; canCancel?: boolean; onCancel?: () => void }) {
   const [f, setF] = useState({ label: '', imapHost: '', imapUser: email, imapPass: '', imapPort: '993' })
-  const [err, setErr] = useState(''); const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(''); const [detail, setDetail] = useState(''); const [hint, setHint] = useState('')
+  // Only shown once we've genuinely failed to find the server ourselves.
+  const [showServer, setShowServer] = useState(false)
+  const [busy, setBusy] = useState(false)
   async function go() {
-    setErr(''); setBusy(true)
-    const r = await api('/api/accounts', { method: 'POST', body: JSON.stringify({ ...f, imapPort: Number(f.imapPort), label: f.label || f.imapUser }) })
+    setErr(''); setDetail(''); setHint(''); setBusy(true)
+    const r = await api('/api/accounts', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...f,
+        // Blank means "work it out from the address", which is what it can do
+        // for Gmail, Outlook, Zoho and our own server.
+        imapHost: f.imapHost.trim() || undefined,
+        imapPort: f.imapHost.trim() ? Number(f.imapPort) : undefined,
+        label: f.label || f.imapUser,
+      }),
+    })
     setBusy(false)
-    if (r.ok) onDone(); else setErr(r.error || (r.verified === false ? 'Could not connect — check host/user/password' : 'Failed'))
+    if (r.ok) return onDone()
+    setErr(r.error || 'Could not connect to that mailbox.')
+    setDetail(r.detail || ''); setHint(r.hint || '')
+    if (r.needsMailServer || r.verified === false) setShowServer(true)
   }
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value })
   return (
@@ -430,14 +446,26 @@ function AddAccount({ onDone, email, canCancel, onCancel }: { onDone: () => void
           <input className={field} style={{ borderColor: 'var(--line)' }} placeholder="Label (e.g. Work)" value={f.label} onChange={set('label')} />
           <input className={field} style={{ borderColor: 'var(--line)' }} placeholder="Email address" value={f.imapUser} onChange={set('imapUser')} />
           <input className={field} style={{ borderColor: 'var(--line)' }} placeholder="Password / app password" type="password" value={f.imapPass} onChange={set('imapPass')} />
-          <div className="flex gap-3">
-            <input className={field + ' flex-[2]'} style={{ borderColor: 'var(--line)' }} placeholder="IMAP host (e.g. imap.gmail.com)" value={f.imapHost} onChange={set('imapHost')} />
-            <input className={field + ' flex-[1]'} style={{ borderColor: 'var(--line)' }} placeholder="Port" value={f.imapPort} onChange={set('imapPort')} />
-          </div>
+          {showServer && (
+            <div className="flex gap-3 fade-in">
+              <input className={field + ' flex-[2]'} style={{ borderColor: 'var(--line)' }} placeholder="Incoming mail server (e.g. imap.gmail.com)" value={f.imapHost} onChange={set('imapHost')} />
+              <input className={field + ' flex-[1]'} style={{ borderColor: 'var(--line)' }} placeholder="993" value={f.imapPort} onChange={set('imapPort')} />
+            </div>
+          )}
         </div>
-        {err && <p className="text-xs text-red-400 mt-2">{err}</p>}
-        <button disabled={busy || !f.imapHost || !f.imapPass} onClick={go} className="accent-grad text-white font-bold rounded-xl py-3 w-full mt-4 hover:opacity-90 disabled:opacity-50">{busy ? 'Verifying…' : 'Connect'}</button>
-        <p className="text-[11px] text-[color:var(--muted)] mt-3 text-center">SMTP is auto-derived from your host · sending uses the same account.</p>
+        {err && (
+          <div className="mt-2 flex flex-col gap-1">
+            <p className="text-xs text-red-400">{err}</p>
+            {detail && <p className="text-[11px] font-mono leading-relaxed break-words" style={{ color: 'var(--muted)' }}>{detail}</p>}
+            {hint && <p className="text-[11px] leading-relaxed" style={{ color: 'var(--muted)' }}>{hint}</p>}
+          </div>
+        )}
+        <button disabled={busy || !f.imapUser || !f.imapPass} onClick={go} className="accent-grad text-white font-bold rounded-xl py-3 w-full mt-4 hover:opacity-90 disabled:opacity-50">{busy ? 'Verifying…' : 'Connect'}</button>
+        <p className="text-[11px] text-[color:var(--muted)] mt-3 text-center">
+          {showServer
+            ? 'Enter the incoming server. The sending server is worked out from it.'
+            : 'Your mail server is found from your address. With two-factor on, use an app password.'}
+        </p>
       </div>
     </div>
   )
