@@ -1,3 +1,5 @@
+import { hostedHost } from '@/lib/discover'
+import { isZeroAIEmail } from '@/lib/managed-mail'
 import { json } from '@/lib/auth'
 import { userIdFromReq } from '@/lib/session'
 import { mailboxFromReq, MAILBOX_ACCOUNT_ID } from '@/lib/mailbox-session'
@@ -16,7 +18,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   // server itself, so they're shown but not editable here.
   const mb = mailboxFromReq(req)
   if (id === MAILBOX_ACCOUNT_ID && mb) {
-    return json({ ok: true, managed: true, account: {
+    return json({ ok: true, readOnly: true, managed: isZeroAIEmail(mb.email) || mb.imapHost === hostedHost(), account: {
       id: MAILBOX_ACCOUNT_ID, label: mb.label || 'ZeroAI Mail',
       imapHost: mb.imapHost, imapPort: mb.imapPort, imapSecure: mb.imapSecure, imapUser: mb.email,
       smtpHost: mb.smtpHost, smtpPort: mb.smtpPort, smtpSecure: mb.smtpSecure, smtpUser: mb.email,
@@ -27,7 +29,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   if (!uid) return json({ error: 'Unauthorized' }, 401)
   const account = await getAccount(uid, id)
   if (!account) return json({ error: 'Not found' }, 404)
-  return json({ ok: true, account })
+  return json({ ok: true, managed: isZeroAIEmail(account.imapUser) || account.imapHost === hostedHost(), account })
 }
 
 // Edit the mailbox's server settings — the fix for a mailbox still pointing at
@@ -54,6 +56,10 @@ export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }
     imap: { host: str(b.imapHost, cur.imap.host), port: num(b.imapPort, cur.imap.port), secure: bool(b.imapSecure, cur.imap.secure), user: str(b.imapUser, cur.imap.user), pass: newImapPass || cur.imap.pass },
     smtp: { host: str(b.smtpHost, cur.smtp.host), port: num(b.smtpPort, cur.smtp.port), secure: bool(b.smtpSecure, cur.smtp.secure), user: str(b.smtpUser, cur.smtp.user), pass: newSmtpPass || cur.smtp.pass },
     from: cur.from, replyTo: cur.replyTo,
+  }
+  if (isZeroAIEmail(cur.imap.user) || cur.imap.host === hostedHost()) {
+    probe.imap = { ...cur.imap, pass: newImapPass || cur.imap.pass }
+    probe.smtp = { ...cur.smtp, pass: newSmtpPass || cur.smtp.pass }
   }
   const v = await verify(probe)
   if (!v.imap) return json({ error: v.error || 'Could not connect to the incoming (IMAP) server with these settings.', verified: false }, 400)

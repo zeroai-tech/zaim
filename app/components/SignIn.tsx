@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
 import { api, Mark } from '@/lib/client-utils'
+import { isZeroAIEmail } from '@/lib/managed-mail'
 
 // The sign-in form, on its own.
 //
@@ -42,11 +43,11 @@ export function SignInForm({ onDone, autoFocus = false }: { onDone: () => void; 
     const em = email.trim().toLowerCase()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) return setErr('Please enter a valid email address.')
     if (!pw) return setErr('Please enter your mailbox password.')
-    if (needsServer && !imapHost.trim()) return setErr('Enter your incoming (IMAP) mail server.')
+    if (needsServer && !isZeroAIEmail(email) && !imapHost.trim()) return setErr('Enter your incoming (IMAP) mail server.')
 
     setBusy(true)
     const payload: Record<string, unknown> = { email: em, password: pw }
-    if (needsServer) {
+    if (needsServer && !isZeroAIEmail(email)) {
       Object.assign(payload, {
         imapHost: imapHost.trim(), imapPort: +imapPort || 993,
         smtpHost: smtpHost.trim() || undefined, smtpPort: +smtpPort || 465,
@@ -55,7 +56,7 @@ export function SignInForm({ onDone, autoFocus = false }: { onDone: () => void; 
 
     const r = await api('/api/auth/login', { method: 'POST', body: JSON.stringify(payload) })
     if (r.ok) { setBusy(false); return onDone() }
-    if (r.needsMailServer) {
+    if (r.needsMailServer && !isZeroAIEmail(email)) {
       setBusy(false); setNeedsServer(true)
       setErr(r.error || 'Enter your mail server details to continue.')
       setDetail(r.detail || ''); setHint(r.hint || '')
@@ -91,7 +92,7 @@ export function SignInForm({ onDone, autoFocus = false }: { onDone: () => void; 
           onKeyDown={(e) => e.key === 'Enter' && !busy && !needsServer && go()}
         />
 
-        {needsServer && (
+        {needsServer && !isZeroAIEmail(email) && (
           <div className="flex flex-col gap-2 pt-1 fade-in">
             <p className="text-xs" style={{ color: 'var(--muted)' }}>
               Your mail server, from your email provider:

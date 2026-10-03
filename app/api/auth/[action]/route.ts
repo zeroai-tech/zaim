@@ -1,3 +1,4 @@
+import { isZeroAIEmail } from '@/lib/managed-mail'
 import { json } from '@/lib/auth'
 import { verifyPassword, makeSession, sessionCookie, clearCookie, userIdFromReq } from '@/lib/session'
 import { findUserByEmail, findUserById, listAccounts, audit } from '@/lib/store'
@@ -85,7 +86,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ action: string
 
   // An explicitly supplied server wins — that's the escape hatch for a mailbox
   // we can't work out on our own.
-  const manual = (body.imapHost || '').trim()
+  const manual = isZeroAIEmail(email) ? '' : (body.imapHost || '').trim()
   const port = Number(body.imapPort) || 993
   const candidates: MailHosts[] = manual
     ? [{

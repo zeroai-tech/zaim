@@ -1,4 +1,5 @@
 import { promises as dns } from 'node:dns'
+import { ZEROAI_MAIL_HOST, isZeroAIEmail } from './managed-mail'
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Where does this address's mail live?
@@ -24,7 +25,7 @@ export interface MailHosts {
   label: string
 }
 
-export const hostedHost = (): string => (process.env.ZAIM_HOSTED_MAIL_HOST || '').trim().toLowerCase()
+export const hostedHost = (): string => (process.env.ZAIM_HOSTED_MAIL_HOST || ZEROAI_MAIL_HOST).trim().toLowerCase()
 
 const ssl = (host: string, hosted: boolean, label: string): MailHosts => ({
   imapHost: host, imapPort: 993, imapSecure: true,
@@ -59,7 +60,7 @@ export async function discover(email: string): Promise<MailHosts[]> {
 
   // 1. Our own mail server. Match the bare domain too (mail.zeroaitech.tech
   //    hosts zeroaitech.tech) so sign-in works even mid-DNS-propagation.
-  if (HOSTED && (domain === HOSTED || HOSTED.endsWith('.' + domain))) out.push(ssl(HOSTED, true, 'ZeroAI Mail'))
+  if (isZeroAIEmail(email) || (HOSTED && (domain === HOSTED || HOSTED.endsWith('.' + domain)))) return [ssl(HOSTED, true, 'ZeroAI Mail')]
 
   const mx = (await dnsOk(dns.resolveMx(domain))) || []
   const exchanges = mx.sort((a, b) => a.priority - b.priority).map((r) => r.exchange.toLowerCase().replace(/\.$/, ''))
@@ -93,5 +94,5 @@ export async function discover(email: string): Promise<MailHosts[]> {
 // password" vs "check your mail server details").
 export async function isHosted(email: string): Promise<boolean> {
   const c = await discover(email)
-  return c.some((x) => x.hosted)
+  return c.some((x) => x.hosted && !x.fallback)
 }

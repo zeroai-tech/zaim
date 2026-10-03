@@ -14,7 +14,7 @@ const mime = message => Buffer.from(`From: ${message.name} <${message.from}>\r\n
 class FakeImap {
   constructor(options) { this.options=options; this.mailbox={exists:3,uidValidity:1n}; }
   on(){return this;}
-  async connect(){ const s=state(); if(s.authFailure)throw Object.assign(new Error('Authentication failed'),{authenticationFailed:true});if(!s.online)throw Object.assign(new Error('connect ECONNREFUSED'),{code:'ECONNREFUSED'});this.mailbox.uidValidity=BigInt(s.generation||1); }
+  async connect(){ update(s => { s.connections = [...(s.connections || []), {host:this.options.host,user:this.options.auth.user}]; }); const s=state(); if(s.authFailure)throw Object.assign(new Error('Authentication failed'),{authenticationFailed:true});if(!s.online)throw Object.assign(new Error('connect ECONNREFUSED'),{code:'ECONNREFUSED'});this.mailbox.uidValidity=BigInt(s.generation||1); }
   async logout(){}
   async getMailboxLock(path){this.path=path;return{release(){}};}
   async list(){return[{path:'INBOX',name:'Inbox'},{path:'Sent',name:'Sent',specialUse:'\\Sent'},{path:'Drafts',name:'Drafts',specialUse:'\\Drafts'},{path:'Trash',name:'Trash',specialUse:'\\Trash'}];}
@@ -28,6 +28,6 @@ class FakeImap {
 }
 Module._load = function(request,parent,isMain){
   if(request==='imapflow')return{ImapFlow:FakeImap};
-  if(request==='nodemailer'){const real=original.call(this,request,parent,isMain);return{...real,createTransport(){return{async sendMail(input){if(!state().online)throw Object.assign(new Error('SMTP offline'),{code:'ECONNREFUSED'});update(s=>{s.sent=(s.sent||0)+1;s.lastTo=input.envelope.to;s.lastRaw=Buffer.from(input.raw).toString('base64')});return{messageId:'fixture-message-id'};}};}};}
+  if(request==='nodemailer'){const real=original.call(this,request,parent,isMain);return{...real,createTransport(){return{async verify(){if(!state().online)throw new Error('SMTP offline');return true;},async sendMail(input){if(!state().online)throw Object.assign(new Error('SMTP offline'),{code:'ECONNREFUSED'});update(s=>{s.sent=(s.sent||0)+1;s.lastTo=input.envelope.to;s.lastRaw=Buffer.from(input.raw).toString('base64')});return{messageId:'fixture-message-id'};}};}};}
   return original.call(this,request,parent,isMain);
 };

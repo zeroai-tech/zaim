@@ -16,6 +16,7 @@ import { Landing } from './components/Landing'
 import { DesktopSignIn } from './components/SignIn'
 import { Icon } from './components/Icon'
 import { isDesktop } from '@/lib/platform'
+import { isZeroAIEmail } from '@/lib/managed-mail'
 
 export default function Zaim() {
   const [phase, setPhase] = useState<'loading' | 'auth' | 'add-account' | 'app'>('loading')
@@ -329,7 +330,7 @@ export default function Zaim() {
       <TopBar
         accounts={accounts} activeAccount={activeAccount} activeEmail={active?.email || email} activeLabel={active?.label || 'Mailbox'}
         email={email} avatar={avatar}
-        onSwitchAccount={(id) => { readSeq.current++;setSel(null);setSelUid(null);setMessages([]);setCompose(null);setReaderError('');setListError('');setActiveAccount(id); setActiveFolder('INBOX'); setSmartView(null) }}
+        onSwitchAccount={(id) => { readSeq.current++;setSel(null);setSelUid(null);setMessages([]);setCompose(null);setReaderError('');setListError('');setMobilePane('list');setActiveAccount(id); setActiveFolder('INBOX'); setSmartView(null) }}
         onAddAccount={() => setPhase('add-account')}
         onEditAccount={(id) => setEditAccount(id)}
         search={search} onSearch={setSearch}
@@ -486,7 +487,7 @@ function AddAccount({ onDone, email, canCancel, onCancel }: { onDone: () => void
         ...f,
         // Blank means "work it out from the address", which is what it can do
         // for Gmail, Outlook, Zoho and our own server.
-        imapHost: f.imapHost.trim() || undefined,
+        imapHost: !isZeroAIEmail(f.imapUser) && showServer ? f.imapHost.trim() || undefined : undefined,
         imapPort: f.imapHost.trim() ? Number(f.imapPort) : undefined,
         label: f.label || f.imapUser,
       }),
@@ -495,26 +496,27 @@ function AddAccount({ onDone, email, canCancel, onCancel }: { onDone: () => void
     if (r.ok) return onDone()
     setErr(r.error || 'Could not connect to that mailbox.')
     setDetail(r.detail || ''); setHint(r.hint || '')
-    if (r.needsMailServer || r.verified === false) setShowServer(true)
+    if (r.needsMailServer && !isZeroAIEmail(f.imapUser)) setShowServer(true)
   }
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setF({ ...f, [k]: e.target.value })
   return (
-    <div className="h-screen grid place-items-center px-6">
+    <div className="min-h-screen grid place-items-center px-6 py-8">
       <div className="glass rounded-2xl p-8 w-full max-w-md fade-in">
-        <div className="flex items-center gap-2 mb-6"><Mark /><span className="font-extrabold text-lg tracking-tight">Zaim</span>{canCancel && <button onClick={onCancel} className="ml-auto text-[color:var(--muted)] hover:text-white">✕</button>}</div>
+        <div className="flex items-center gap-2 mb-6"><Mark /><span className="font-extrabold text-lg tracking-tight">Zaim</span>{canCancel && <button onClick={onCancel} aria-label="Close mailbox settings" className="ml-auto icon-button"><Icon name="close" /></button>}</div>
         <h1 className="text-xl font-bold">Connect a mailbox</h1>
         <p className="text-sm text-[color:var(--muted)] mt-1 mb-5">Your credentials are encrypted at rest and only used to reach your mail host.</p>
         <div className="flex flex-col gap-3">
           <input className={field} style={{ borderColor: 'var(--line)' }} placeholder="Label (e.g. Work)" value={f.label} onChange={set('label')} />
-          <input className={field} style={{ borderColor: 'var(--line)' }} placeholder="Email address" value={f.imapUser} onChange={set('imapUser')} />
-          <input className={field} style={{ borderColor: 'var(--line)' }} placeholder="Password / app password" type="password" value={f.imapPass} onChange={set('imapPass')} />
-          {showServer && (
+          <input className={field} style={{ borderColor: 'var(--line)' }} aria-label="Email address" type="email" autoComplete="username" placeholder="Email address" value={f.imapUser} onChange={e => { setF({ ...f, imapUser: e.target.value, imapHost: '' }); setShowServer(false) }} />
+          <input className={field} style={{ borderColor: 'var(--line)' }} aria-label="Mailbox password" autoComplete="current-password" placeholder={isZeroAIEmail(f.imapUser) ? "Mailbox password" : "Password / app password"} type="password" value={f.imapPass} onChange={set('imapPass')} onKeyDown={e => { if (e.key === 'Enter' && !busy && f.imapUser && f.imapPass) go() }} />
+          {showServer && !isZeroAIEmail(f.imapUser) && (
             <div className="flex gap-3 fade-in">
               <input className={field + ' flex-[2]'} style={{ borderColor: 'var(--line)' }} placeholder="Incoming mail server (e.g. imap.gmail.com)" value={f.imapHost} onChange={set('imapHost')} />
               <input className={field + ' flex-[1]'} style={{ borderColor: 'var(--line)' }} placeholder="993" value={f.imapPort} onChange={set('imapPort')} />
             </div>
           )}
         </div>
+        {!isZeroAIEmail(f.imapUser) && <button onClick={() => setShowServer(v => !v)} className="text-xs mt-3 text-[color:var(--muted)]">{showServer ? "Hide server settings" : "Advanced server settings"}</button>}
         {err && (
           <div className="mt-2 flex flex-col gap-1">
             <p className="text-xs text-red-400">{err}</p>
@@ -524,7 +526,7 @@ function AddAccount({ onDone, email, canCancel, onCancel }: { onDone: () => void
         )}
         <button disabled={busy || !f.imapUser || !f.imapPass} onClick={go} className="accent-grad text-white font-bold rounded-xl py-3 w-full mt-4 hover:opacity-90 disabled:opacity-50">{busy ? 'Verifying…' : 'Connect'}</button>
         <p className="text-[11px] text-[color:var(--muted)] mt-3 text-center">
-          {showServer
+          {isZeroAIEmail(f.imapUser) ? 'ZeroAI Mail — sign in with your email and mailbox password. Server settings are managed automatically.' : showServer
             ? 'Enter the incoming server. The sending server is worked out from it.'
             : 'Your mail server is found from your address. With two-factor on, use an app password.'}
         </p>
@@ -539,6 +541,9 @@ function AddAccount({ onDone, email, canCancel, onCancel }: { onDone: () => void
 type EditForm = { label: string; imapHost: string; imapPort: string; imapSecure: boolean; imapUser: string; smtpHost: string; smtpPort: string; smtpSecure: boolean; smtpUser: string; pass: string }
 function EditAccount({ accountId, onClose, onSaved, onDeleted }: { accountId: string; onClose: () => void; onSaved: () => void; onDeleted: () => void }) {
   const [f, setF] = useState<EditForm | null>(null)
+  const [managed, setManaged] = useState(false)
+  const [readOnly, setReadOnly] = useState(false)
+  const [advanced, setAdvanced] = useState(false)
   const [err, setErr] = useState(''); const [busy, setBusy] = useState(false); const [confirmDel, setConfirmDel] = useState(false)
 
   useEffect(() => {
@@ -547,6 +552,7 @@ function EditAccount({ accountId, onClose, onSaved, onDeleted }: { accountId: st
       if (!live) return
       if (!r.ok || !r.account) { setErr(r.error || 'Could not load settings'); return }
       const a = r.account
+      setManaged(!!r.managed); setReadOnly(!!r.readOnly)
       setF({ label: a.label || '', imapHost: a.imapHost || '', imapPort: String(a.imapPort || 993), imapSecure: a.imapSecure !== false, imapUser: a.imapUser || '', smtpHost: a.smtpHost || '', smtpPort: String(a.smtpPort || 465), smtpSecure: a.smtpSecure !== false, smtpUser: a.smtpUser || '', pass: '' })
     })
     return () => { live = false }
@@ -576,12 +582,14 @@ function EditAccount({ accountId, onClose, onSaved, onDeleted }: { accountId: st
   return (
     <div className="fixed inset-0 z-40 grid place-items-center bg-black/50 px-4" onClick={onClose}>
       <div className="glass rounded-2xl p-6 w-full max-w-md fade-in max-h-[90vh] overflow-auto" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2 mb-4"><span className="font-extrabold text-lg tracking-tight">Mailbox settings</span><button onClick={onClose} className="ml-auto text-[color:var(--muted)] hover:text-white">✕</button></div>
+        <div className="flex items-center gap-2 mb-4"><span className="font-extrabold text-lg tracking-tight">Mailbox settings</span><button onClick={onClose} aria-label="Close mailbox settings" className="ml-auto icon-button"><Icon name="close" /></button></div>
         {!f ? <p className="text-sm text-[color:var(--muted)] py-6 text-center">{err || 'Loading…'}</p> : (<>
           <div className="flex flex-col gap-3">
-            <input className={field} style={bd} placeholder="Label" value={f.label} onChange={upd('label')} />
-            <input className={field} style={bd} placeholder="Email / username" value={f.imapUser} onChange={upd('imapUser')} />
-            <div>
+            <input className={field} style={bd} aria-label="Mailbox label" disabled={readOnly} placeholder="Label" value={f.label} onChange={upd('label')} />
+            <input className={field} style={bd} aria-label="Mailbox email" readOnly={managed || readOnly} placeholder="Email / username" value={f.imapUser} onChange={upd('imapUser')} />
+            {managed && <p className="text-xs text-[color:var(--muted)]">ZeroAI Mail manages your connection automatically.</p>}
+            {!managed && !readOnly && <button className="text-xs text-left text-[color:var(--muted)]" onClick={() => setAdvanced(v => !v)}>{advanced ? "Hide server settings" : "Advanced server settings"}</button>}
+            {!managed && advanced && <><div>
               <div className="text-[11px] font-semibold text-[color:var(--muted)] mb-1">Incoming — IMAP</div>
               <div className="flex gap-2">
                 <input className={field + ' flex-[2]'} style={bd} placeholder="IMAP host" value={f.imapHost} onChange={upd('imapHost')} />
@@ -597,10 +605,11 @@ function EditAccount({ accountId, onClose, onSaved, onDeleted }: { accountId: st
               </div>
               <label className="flex items-center gap-2 text-[11px] text-[color:var(--muted)] mt-1.5"><input type="checkbox" checked={f.smtpSecure} onChange={upd('smtpSecure')} /> SSL/TLS (typically port 465)</label>
             </div>
-            <input className={field} style={bd} type="password" placeholder="New password (leave blank to keep current)" value={f.pass} onChange={upd('pass')} />
+            </>}
+            {!readOnly && <input className={field} style={bd} type="password" placeholder="New password (leave blank to keep current)" value={f.pass} onChange={upd('pass')} />}
           </div>
           {err && <p className="text-xs text-red-400 mt-2">{err}</p>}
-          <button disabled={busy || !f.imapHost} onClick={save} className="accent-grad text-white font-bold rounded-xl py-3 w-full mt-4 hover:opacity-90 disabled:opacity-50">{busy ? 'Verifying…' : 'Save & verify'}</button>
+          {readOnly ? <p className="text-xs text-[color:var(--muted)] mt-4">This is your signed-in mailbox. Sign out and sign in again to update its credentials.</p> : <><button disabled={busy || !f.imapHost} onClick={save} className="accent-grad text-white font-bold rounded-xl py-3 w-full mt-4 hover:opacity-90 disabled:opacity-50">{busy ? 'Verifying…' : 'Save & verify'}</button>
           <p className="text-[11px] text-[color:var(--muted)] mt-2 text-center">The incoming server is tested before saving, so a wrong setting can’t lock you out.</p>
           <div className="mt-4 pt-3" style={{ borderTop: '1px solid var(--line)' }}>
             {!confirmDel ? (
@@ -613,6 +622,7 @@ function EditAccount({ accountId, onClose, onSaved, onDeleted }: { accountId: st
               </div>
             )}
           </div>
+          </>}
         </>)}
       </div>
     </div>

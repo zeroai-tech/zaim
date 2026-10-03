@@ -3,7 +3,9 @@ import { ensureUserId, withLink } from '@/lib/link-user'
 import { addAccount, listAccounts, type AccountInput } from '@/lib/store'
 import { verify } from '@/lib/mail'
 import type { MailAccount } from '@/lib/config'
-import { discover } from '@/lib/discover'
+import { discover, hostedHost } from '@/lib/discover'
+import { isZeroAIEmail } from '@/lib/managed-mail'
+import { mailboxFromReq } from '@/lib/mailbox-session'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -19,7 +21,7 @@ export async function GET(req: Request) {
 interface ServerPair {
   imapHost: string; imapPort: number; imapSecure: boolean
   smtpHost: string; smtpPort: number; smtpSecure: boolean
-  label: string
+  label: string; hosted?: boolean; fallback?: boolean
 }
 
 /**
@@ -45,7 +47,7 @@ function pairFromHost(host: string, a: AccountInput): ServerPair {
   return {
     imapHost, imapPort, imapSecure: a.imapSecure === false ? false : imapPort !== 143,
     smtpHost, smtpPort, smtpSecure: a.smtpSecure === false ? false : smtpPort === 465,
-    label: imapHost,
+    label: imapHost, hosted: imapHost === hostedHost(),
   }
 }
 
@@ -63,25 +65,30 @@ export async function POST(req: Request) {
   let a: AccountInput
   try { a = await req.json() } catch { return json({ error: 'Invalid body' }, 400) }
 
-  const user = (a.imapUser || '').trim()
-  if (!a.label || !user || !a.imapPass) return json({ error: 'label, imapUser and imapPass are required' }, 400)
+  const user = (a.imapUser || '').trim().toLowerCase()
+  if (!a.label || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(user) || !a.imapPass) return json({ error: 'label, imapUser and imapPass are required' }, 400)
+
+  if (mailboxFromReq(req)?.email.toLowerCase() === user || (await listAccounts(uid)).some(account => account.imap_user.toLowerCase() === user)) {
+    return withLink(json({ error: 'This mailbox is already connected. Select it from the mailbox switcher, or update it in Mailbox settings.' }, 409), { uid, setCookie })
+  }
 
   // The host is now optional. Most people know their address and their
   // password and nothing else, and the app already knows how to find Gmail,
   // Outlook, Zoho and our own server from the address alone — asking anyway
   // is how "smtp.gmail.com" ended up in a field that wanted an IMAP server.
-  const pairs: ServerPair[] = a.imapHost?.trim()
+  const pairs: ServerPair[] = a.imapHost?.trim() && !isZeroAIEmail(user)
     ? [pairFromHost(a.imapHost, a)]
     : (await discover(user)).map((c) => ({
         imapHost: c.imapHost, imapPort: c.imapPort, imapSecure: c.imapSecure,
         smtpHost: c.smtpHost, smtpPort: c.smtpPort, smtpSecure: c.smtpSecure,
-        label: c.label,
+        label: c.label, hosted: c.hosted, fallback: c.fallback,
       }))
 
   if (!pairs.length) {
     return withLink(json({ error: "We couldn't work out the mail server for that address — enter it below.", needsMailServer: true }, 400), { uid, setCookie })
   }
 
+  const managed = pairs.some(p => p.hosted && !p.fallback)
   let lastError = ''
   for (const p of pairs.slice(0, 4)) {
     const v = await verify(toMailAccount(p, user, a.imapPass))
@@ -110,11 +117,11 @@ export async function POST(req: Request) {
 
   console.error(`[accounts] could not connect ${user} — tried ${pairs.slice(0, 4).map((p) => `${p.imapHost}:${p.imapPort}`).join(', ')}: ${lastError}`)
   return withLink(json({
-    ok: false, verified: false,
+    ok: false, verified: false, needsMailServer: !managed && !/AUTHENTICATIONFAILED|invalid password|credentials/i.test(lastError),
     error: 'Could not connect to that mailbox.',
     detail: lastError || undefined,
     triedHosts: pairs.slice(0, 4).map((p) => `${p.imapHost}:${p.imapPort}`),
-    hint: /2|app password|credentials|AUTHENTICATIONFAILED/i.test(lastError)
+    hint: !managed && /2|app password|credentials|AUTHENTICATIONFAILED/i.test(lastError)
       ? 'With two-factor authentication on, use an app password rather than your normal one.'
       : undefined,
   }, 200), { uid, setCookie })
