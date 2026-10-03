@@ -52,7 +52,7 @@ function setupUpdates({ app, ipcMain, BrowserWindow, net, port, stopChildren, up
         const prepared = await updater.prepareInstall()
         await updater.install(prepared)
         stopChildren(); app.quit()
-      } else { updater.quitAndInstall(false, true) }
+      } else { updater.quitAndInstall(true, true) }
     } catch (error) { notify({ status: 'ready', error: error.message }) }
     return state
   }
