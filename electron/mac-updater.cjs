@@ -52,7 +52,10 @@ class MacUpdater extends EventEmitter {
   async differential(metadata, destination) {
     const { GenericDifferentialDownloader } = require('electron-updater/out/differentialDownloader/GenericDifferentialDownloader')
     const { ElectronHttpExecutor } = require('electron-updater/out/electronHttpExecutor')
-    const { CancellationToken } = require('builder-util-runtime')
+    // Resolve the updater's own runtime: electron-builder may nest it instead
+    // of hoisting it into the packaged app's root node_modules.
+    const updaterRequire = require('node:module').createRequire(require.resolve('electron-updater'))
+    const { CancellationToken } = updaterRequire('builder-util-runtime')
     const oldFile = path.join(this.directory, 'installed.zip')
     await fs.access(oldFile)
     const oldMap = JSON.parse(await fs.readFile(path.join(this.directory, 'installed.blockmap.json'), 'utf8'))

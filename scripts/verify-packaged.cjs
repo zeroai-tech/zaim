@@ -41,6 +41,7 @@ async function launch() {
     const updateState = await page.evaluate(() => window.zaimUpdates.state())
     assert.equal(updateState.currentVersion, await app.evaluate(({app}) => app.getVersion()))
     assert.equal(updateState.status, 'idle')
+    if (process.platform === 'darwin') await require('./verify-mac-delta.cjs')(app, temp)
     const split = cookie.indexOf('=')
     await app.context().addCookies([{name:cookie.slice(0,split),value:cookie.slice(split+1),url:origin,httpOnly:true,sameSite:'Lax',expires:Date.now()/1000+86400}])
     await page.reload()
