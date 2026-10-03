@@ -16,3 +16,5 @@ build/
 # graphify
 graphify-out/
 .env*
+
+output/

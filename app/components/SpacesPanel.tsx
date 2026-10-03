@@ -1,43 +1,7 @@
 'use client'
 import { Folder, SmartView } from '@/lib/client-utils'
-
-// The left "Spaces" rail. Real mailbox folders (Inbox/Sent/Drafts/Archive/…) are
-// Spaces; Starred/Unread/Today are dynamic smart views layered on top of
-// whichever folder is loaded, per the design brief's "Spaces vs. dynamic views"
-// split. Attachments/Waiting/Needs Reply/Scheduled aren't here yet — they need
-// data the mail API doesn't expose per-message yet (attachment presence in the
-// list endpoint) or a feature that doesn't exist (send-later, reply-tracking).
-export function SpacesPanel({
-  folders, activeFolder, smartView, onSelectFolder, onSelectSmartView,
-}: {
-  folders: Folder[]; activeFolder: string; smartView: SmartView
-  onSelectFolder: (key: string) => void; onSelectSmartView: (v: SmartView) => void
-}) {
-  const spaces = folders.filter((f) => f.key !== 'starred')
-  const starred = folders.find((f) => f.key === 'starred')
-  const rowCls = (active: boolean) => `flex items-center gap-3 px-3 py-2 rounded-lg text-sm cursor-pointer text-left w-full ${active ? 'bg-white/5 text-white font-semibold' : 'text-[color:var(--muted)] hover:bg-white/5'}`
-
-  return (
-    <div className="h-full flex flex-col p-3 gap-1 overflow-y-auto">
-      <div className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--muted)] px-3 pt-2 pb-1">Spaces</div>
-      {spaces.map((f) => (
-        <button key={f.key} onClick={() => { onSelectSmartView(null); onSelectFolder(f.key) }} className={rowCls(!smartView && activeFolder === f.key)}>
-          <span>{f.icon}</span>{f.label}
-        </button>
-      ))}
-
-      <div className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--muted)] px-3 pt-4 pb-1">Smart Views</div>
-      {starred && (
-        <button onClick={() => { onSelectSmartView(null); onSelectFolder('starred') }} className={rowCls(!smartView && activeFolder === 'starred')}>
-          <span>{starred.icon}</span>{starred.label}
-        </button>
-      )}
-      <button onClick={() => { onSelectFolder('INBOX'); onSelectSmartView('unread') }} className={rowCls(smartView === 'unread')}>
-        <span>●</span>Unread
-      </button>
-      <button onClick={() => { onSelectFolder('INBOX'); onSelectSmartView('today') }} className={rowCls(smartView === 'today')}>
-        <span>◐</span>Today
-      </button>
-    </div>
-  )
+import { Icon, IconName } from './Icon'
+const icons: Record<string, IconName> = { INBOX: 'inbox', sent: 'sent', drafts: 'draft', 'local-drafts': 'draft', archive: 'archive', junk: 'warning', trash: 'trash', starred: 'star' }
+export function SpacesPanel({ folders, activeFolder, smartView, onSelectFolder, onSelectSmartView }: { folders: Folder[]; activeFolder: string; smartView: SmartView; onSelectFolder: (key: string) => void; onSelectSmartView: (v: SmartView) => void }) {
+  return <aside className="mail-sidebar"><p className="sidebar-label">MAILBOX</p><nav aria-label="Mail folders">{folders.filter(f => f.key !== 'starred').map(folder => <button key={folder.key} className={'folder-row ' + (!smartView && activeFolder === folder.key ? 'is-active' : '')} aria-current={!smartView && activeFolder === folder.key ? 'page' : undefined} onClick={() => { onSelectSmartView(null); onSelectFolder(folder.key) }}><Icon name={icons[folder.key] || 'archive'} size={18} /><span>{folder.label}</span>{folder.key === 'local-drafts' && <span className="local-tag">DEVICE</span>}</button>)}</nav><p className="sidebar-label mt-7">QUICK VIEWS</p><button className={'folder-row ' + (activeFolder === 'starred' ? 'is-active' : '')} onClick={() => { onSelectSmartView(null); onSelectFolder('starred') }}><Icon name="star" />Starred</button><button className={'folder-row ' + (smartView === 'unread' ? 'is-active' : '')} onClick={() => { onSelectFolder('INBOX'); onSelectSmartView('unread') }}><span className="unread-dot" />Unread</button><button className={'folder-row ' + (smartView === 'today' ? 'is-active' : '')} onClick={() => { onSelectFolder('INBOX'); onSelectSmartView('today') }}><Icon name="cloud" />Today</button><div className="sidebar-foot"><Icon name="lock" size={16} /><p>Your mailbox.<br /><span>Your workspace.</span></p></div></aside>
 }

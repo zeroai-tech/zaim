@@ -11,6 +11,26 @@ Zaim is a mail client with three faces on one secure core:
 
 Built by **ZeroAI**.
 
+## Desktop offline workspace
+
+The desktop app runs its mail server on loopback and stores its vault in the OS application-data directory. Its redesigned inbox, reader, composer, light/dark themes and mobile layouts also serve the web app.
+
+- Sign in while connected. The encrypted mailbox session lasts 30 days; signing in again requires a connection.
+- Open a folder and choose **Download for offline**. This downloads the currently loaded messages and available attachments, without changing unread flags. Load additional pages and download them separately as needed.
+- During a transport outage, downloaded folder lists and messages remain available. Messages and attachments that were never downloaded require reconnecting. Authentication rejection does not silently fall back to cached mail.
+- **Local drafts** save recipients, formatted content and attachments on this device, including incomplete drafts. They survive an app restart. Reconnecting never sends a draft automatically; review it and click **Send** while connected.
+- SMTP delivery can be ambiguous after a timeout: check Sent before retrying. Zaim does not automatically retry sending.
+
+Offline records are encrypted with the per-machine key, scoped to the account, and written atomically with owner-only file permissions. The key lives in the same profile; this is not protection against someone who can read the entire profile. Back up the profile and its secrets together. Remote images in message bodies are blocked until explicitly enabled.
+
+Build the Electron app with `npm run desktop:dist`. For an isolated profile, set `ZAIM_USER_DATA_DIR` to an absolute directory; `ZAIM_PORT` optionally changes the loopback port (default 34117). A macOS window can be closed and reopened without stopping the local mail server. The legacy Go shell is not the verified release path.
+
+### Verification
+
+`npm run build`, `npm run lint` and `npm run test:offline` check production compilation, types and encrypted-cache behavior. `node scripts/verify-desktop.cjs /path/to/playwright` runs the production server with isolated fake IMAP/SMTP transports and checks cached mail, attachments, draft persistence, explicit sending, responsive layouts and themes. It requires local Chrome and Electron on macOS.
+
+After packaging a Mac x64 app into `release/mac/Zaim.app`, run `node scripts/verify-packaged.cjs /path/to/playwright`. It seeds downloaded fixture mail into an isolated encrypted profile, then verifies the actual packaged app can read it offline, save a draft, restart with its session and draft intact, and reopen the last window. No real email is sent. Live provider delivery, Windows/Linux installers, signing and notarization require separate validation.
+
 ---
 
 ## Why

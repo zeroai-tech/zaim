@@ -1,101 +1,82 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Att, ComposeInit, api, fmtSize, q, readB64 } from '@/lib/client-utils'
+import { Icon } from './Icon'
 
-// Renders inline in the Reading Canvas (no modal) — per the design brief,
-// "the reading canvas transforms" into the composer rather than a popup
-// appearing on top of it.
-export function Compose({ initial, from, account, onClose, onSent }: { initial: ComposeInit; from?: string; account: string; onClose: () => void; onSent: () => void }) {
-  const [to, setTo] = useState(initial.to); const [cc, setCc] = useState(initial.cc || ''); const [bcc, setBcc] = useState('')
-  const [subject, setSubject] = useState(initial.subject)
-  const [showCc, setShowCc] = useState(!!initial.cc); const [showBcc, setShowBcc] = useState(false)
-  const [atts, setAtts] = useState<Att[]>(initial.attachments || [])
-  const [sending, setSending] = useState(false); const [error, setError] = useState('')
-  const ed = useRef<HTMLDivElement>(null); const fileIn = useRef<HTMLInputElement>(null)
-
-  // A draft saved with only a plain-text body (no html part) has no `initial.html`
-  // at all — fall back to the text so its content isn't silently dropped.
+function cleanEditorHtml(html: string) {
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const allowed = new Set(['P','BR','DIV','SPAN','STRONG','B','EM','I','U','UL','OL','LI','A','BLOCKQUOTE'])
+  doc.body.querySelectorAll('*').forEach(el => {
+    if (['SCRIPT','STYLE','IFRAME','OBJECT','EMBED','FORM','INPUT','IMG','SVG','MATH'].includes(el.tagName)) { el.remove(); return }
+    if (!allowed.has(el.tagName)) { el.replaceWith(...el.childNodes); return }
+    for (const attr of Array.from(el.attributes)) if (!(el.tagName === 'A' && attr.name === 'href' && /^(https?:|mailto:)/i.test(attr.value))) el.removeAttribute(attr.name)
+    if (el.tagName === 'A') { el.setAttribute('target', '_blank'); el.setAttribute('rel', 'noopener noreferrer') }
+  })
+  return doc.body.innerHTML
+}
+export function Compose({ initial, from, account, onClose, onSent, desktop, offline }: { initial: ComposeInit; from?: string; account: string; onClose: () => void; onSent: () => void; desktop: boolean; offline: boolean }) {
+  const [to, setTo] = useState(initial.to), [cc, setCc] = useState(initial.cc || ''), [bcc, setBcc] = useState(initial.bcc || '')
+  const [subject, setSubject] = useState(initial.subject), [atts, setAtts] = useState<Att[]>(initial.attachments || [])
+  const [body, setBody] = useState(''), [showCopies, setShowCopies] = useState(!!initial.cc || !!initial.bcc)
+  const [sending, setSending] = useState(false), [error, setError] = useState(''), [saveStatus, setSaveStatus] = useState('')
+  const ed = useRef<HTMLDivElement>(null), fileIn = useRef<HTMLInputElement>(null), draftId = useRef(initial.localDraftId)
+  const queue = useRef<Promise<boolean>>(Promise.resolve(true)), mounted = useRef(true), sent = useRef(false)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => {
     if (!ed.current) return
-    if (initial.html) ed.current.innerHTML = initial.html
-    else if (initial.text) ed.current.innerHTML = initial.text
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')
+    ed.current.innerHTML = initial.html ? cleanEditorHtml(initial.html) : (initial.text || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>')
+    setBody(ed.current.innerHTML)
   }, [initial.html, initial.text])
-  const exec = (cmd: string, val?: string) => { document.execCommand(cmd, false, val); ed.current?.focus() }
+  const payload = useCallback(() => ({ to, cc, bcc, subject, html: ed.current?.innerHTML || body, attachments: atts.map(a => ({ filename: a.name, content: a.content, contentType: a.contentType })) }), [to, cc, bcc, subject, body, atts])
+  const latestSave = useRef<() => Promise<boolean>>(() => Promise.resolve(true))
+  useEffect(() => () => { if (!sent.current) void latestSave.current() }, [])
+  const save = useCallback(() => {
+    const data = payload()
+    if (!desktop || sent.current) return Promise.resolve(true)
+    if (mounted.current) setSaveStatus('Saving to device…')
+    queue.current = queue.current.catch(() => false).then(async () => {
+      if (sent.current) return true
+      const result = await api('/api/local/drafts' + q({ account }), { method:'POST', body: JSON.stringify({ ...data, id: draftId.current }) })
+      if (result.ok) draftId.current = result.draft.id
+      if (mounted.current) { setSaveStatus(result.ok ? 'Saved on this device' : 'Draft could not be saved'); if (!result.ok) setError(result.error || 'Could not save draft.') }
+      return !!result.ok
+    })
+    return queue.current
+  }, [desktop, account, payload])
+  latestSave.current = save
+  useEffect(() => {
+    if (!desktop || sending || (!to && !subject && !body && !atts.length)) return
+    const timer = setTimeout(() => { void save() }, 800)
+    return () => clearTimeout(timer)
+  }, [desktop, sending, to, subject, body, atts, save])
+  async function close() { if (!desktop || await save()) onClose() }
   async function addFiles(files: FileList | null) {
     if (!files) return
     const next: Att[] = []
-    for (const f of Array.from(files)) next.push({ name: f.name, size: f.size, content: await readB64(f), contentType: f.type || 'application/octet-stream' })
-    setAtts((a) => [...a, ...next])
+    try {
+      if (atts.reduce((n,a) => n+a.size,0) + Array.from(files).reduce((n,f) => n+f.size,0) > 15*1024*1024) throw new Error('Keep total attachments under 15 MB.')
+      for (const f of Array.from(files)) next.push({ name:f.name, size:f.size, content:await readB64(f), contentType:f.type || 'application/octet-stream' })
+      setAtts(a => [...a,...next])
+    } catch (error) { setError((error as Error).message) }
   }
   async function send() {
+    if (offline) { setError('Reconnect before sending. Your draft stays on this device.'); return }
     setError(''); setSending(true)
-    const html = ed.current?.innerHTML || ''
-    const r = await api('/api/mail/send' + q({ account }), { method: 'POST', body: JSON.stringify({
-      to, cc: cc || undefined, bcc: bcc || undefined, subject, html,
-      attachments: atts.map((a) => ({ filename: a.name, content: a.content, contentType: a.contentType })),
-      saveToSent: true, draft: initial.draft,
-    }) })
+    if (desktop && !(await save())) { setSending(false); return }
+    const r = await api('/api/mail/send'+q({account}), { method:'POST', body:JSON.stringify({ ...payload(), saveToSent:true, draft:initial.draft, localDraftId:draftId.current }) })
     setSending(false)
-    if (r.ok) { if (r.draftWarning || r.sentWarning) alert([r.draftWarning, r.sentWarning].filter(Boolean).join(' ')); onSent() }
-    else setError(r.error || 'Send failed')
+    if (r.ok) { sent.current = true; if (r.draftWarning || r.sentWarning) alert([r.draftWarning,r.sentWarning].filter(Boolean).join(' ')); onSent() }
+    else setError((r.error || 'Sending could not be confirmed.') + ' Your draft is retained. Check Sent before retrying if the connection failed during delivery.')
   }
-  const line = 'bg-transparent border-b pb-2 text-sm outline-none focus:border-[color:var(--accent)] w-full'
-  const tbtn = 'w-8 h-8 rounded-lg grid place-items-center text-[color:var(--muted)] hover:text-white hover:bg-white/5 text-sm'
-
-  return (
-    <div data-testid="compose-inline" className="flex flex-col h-full fade-in">
-      <div className="flex items-center justify-between px-8 h-14 shrink-0" style={{ borderBottom: '1px solid var(--line)' }}>
-        <span className="font-bold text-sm">New message{from ? ` · from ${from}` : ''}</span>
-        <button onClick={onClose} className="text-[color:var(--muted)] hover:text-white">✕</button>
-      </div>
-      <div className="p-8 flex flex-col gap-3 overflow-y-auto flex-1 max-w-[900px]">
-        <div className="flex items-center gap-2" style={{ borderBottom: '1px solid var(--line)' }}>
-          <input value={to} onChange={(e) => setTo(e.target.value)} placeholder="To" className={line} style={{ border: 'none' }} />
-          <div className="flex gap-2 text-[11px] shrink-0">
-            {!showCc && <button onClick={() => setShowCc(true)} className="text-[color:var(--muted)] hover:text-white">Cc</button>}
-            {!showBcc && <button onClick={() => setShowBcc(true)} className="text-[color:var(--muted)] hover:text-white">Bcc</button>}
-          </div>
-        </div>
-        {showCc && <input value={cc} onChange={(e) => setCc(e.target.value)} placeholder="Cc" className={line} style={{ borderColor: 'var(--line)' }} autoFocus />}
-        {showBcc && <input value={bcc} onChange={(e) => setBcc(e.target.value)} placeholder="Bcc" className={line} style={{ borderColor: 'var(--line)' }} autoFocus />}
-        <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject" className={line} style={{ borderColor: 'var(--line)' }} />
-
-        <div className="flex items-center gap-0.5 -mb-1">
-          <button onClick={() => exec('bold')} className={tbtn + ' font-bold'} title="Bold">B</button>
-          <button onClick={() => exec('italic')} className={tbtn + ' italic'} title="Italic">I</button>
-          <button onClick={() => exec('underline')} className={tbtn + ' underline'} title="Underline">U</button>
-          <span className="w-px h-4 mx-1" style={{ background: 'var(--line)' }} />
-          <button onClick={() => exec('insertUnorderedList')} className={tbtn} title="Bulleted list">•</button>
-          <button onClick={() => exec('insertOrderedList')} className={tbtn} title="Numbered list">1.</button>
-          <button onClick={() => { const u = prompt('Link URL:'); if (u) exec('createLink', u) }} className={tbtn} title="Insert link">🔗</button>
-          <span className="w-px h-4 mx-1" style={{ background: 'var(--line)' }} />
-          <button onClick={() => fileIn.current?.click()} className={tbtn} title="Attach files">📎</button>
-        </div>
-
-        <div ref={ed} contentEditable suppressContentEditableWarning data-ph="Write your message…"
-          className="zaim-editor flex-1 min-h-[220px] overflow-y-auto text-sm outline-none leading-relaxed rounded-xl px-3 py-3"
-          style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }} />
-
-        <input ref={fileIn} type="file" multiple className="hidden" onChange={(e) => { addFiles(e.target.files); e.target.value = '' }} />
-        {atts.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {atts.map((a, i) => (
-              <div key={i} className="flex items-center gap-2 rounded-lg pl-2.5 pr-2 py-1.5 text-xs" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }}>
-                <span>📎</span><span className="max-w-[180px] truncate font-medium">{a.name}</span>
-                <span className="text-[color:var(--muted)]">{fmtSize(a.size)}</span>
-                <button onClick={() => setAtts((x) => x.filter((_, j) => j !== i))} className="text-[color:var(--muted)] hover:text-red-400 ml-0.5">✕</button>
-              </div>
-            ))}
-          </div>
-        )}
-        {error && <p className="text-xs text-red-400">{error}</p>}
-      </div>
-      <div className="flex items-center gap-3 px-8 py-4 shrink-0" style={{ borderTop: '1px solid var(--line)' }}>
-        <button disabled={sending || !to} onClick={send} className="accent-grad text-white font-bold rounded-xl px-6 py-2.5 text-sm disabled:opacity-50">{sending ? 'Sending…' : 'Send'}</button>
-        <button onClick={() => fileIn.current?.click()} className="text-xs text-[color:var(--muted)] hover:text-white">📎 Attach</button>
-        <span className="text-xs text-[color:var(--muted)] ml-auto">Encrypted transport{atts.length ? ` · ${atts.length} file${atts.length > 1 ? 's' : ''}` : ''}</span>
-      </div>
-    </div>
-  )
+  const exec = (command:string,value?:string) => { document.execCommand(command,false,value); ed.current?.focus(); setBody(ed.current?.innerHTML || '') }
+  return <div data-testid="compose-inline" className="flex flex-col h-full" style={{background:'var(--panel)'}}>
+    <div className="reader-toolbar"><Icon name="compose" /><strong className="text-sm">{initial.localDraftId ? 'Edit local draft' : 'New message'}</strong><button className="ml-auto" aria-label="Close composer" onClick={close}><Icon name="close" /></button></div>
+    <div className="compose-form"><p className="text-xs text-[color:var(--muted)] mb-4">From {from || 'your mailbox'}</p><label>To<input aria-label="To" placeholder="recipient@company.com" value={to} onChange={e=>setTo(e.target.value)} /></label><button className="text-xs text-[color:var(--accent)] mt-3" onClick={()=>setShowCopies(!showCopies)}>{showCopies ? 'Hide' : 'Add'} Cc / Bcc</button>{showCopies && <><label>Cc<input aria-label="Cc" value={cc} onChange={e=>setCc(e.target.value)} /></label><label>Bcc<input aria-label="Bcc" value={bcc} onChange={e=>setBcc(e.target.value)} /></label></>}<label className="mt-4">Subject<input aria-label="Subject" placeholder="What is this about?" value={subject} onChange={e=>setSubject(e.target.value)} /></label>
+      <div className="compose-toolbar" aria-label="Formatting"><button onClick={()=>exec('bold')} aria-label="Bold"><b>B</b></button><button onClick={()=>exec('italic')} aria-label="Italic"><i>I</i></button><button onClick={()=>exec('underline')} aria-label="Underline"><u>U</u></button><button onClick={()=>{const url=prompt('Link URL'); if(url && /^(https?:|mailto:)/i.test(url))exec('createLink',url)}} aria-label="Insert link"><Icon name="reply" size={15} /></button><button onClick={()=>fileIn.current?.click()} aria-label="Attach files"><Icon name="attach" size={16} /></button></div>
+      <div ref={ed} contentEditable suppressContentEditableWarning data-ph="Write your message…" role="textbox" aria-label="Message body" aria-multiline="true" className="zaim-editor min-h-[240px] text-sm leading-7 outline-none" onInput={()=>setBody(ed.current?.innerHTML || '')} />
+      <input ref={fileIn} type="file" multiple className="hidden" onChange={e=>{void addFiles(e.target.files);e.target.value=''}} />
+      {atts.length>0 && <div className="flex flex-wrap gap-2 mt-5">{atts.map((a,i)=><div className="mail-attachment" key={i}><Icon name="attach" size={14} /><span>{a.name} · {fmtSize(a.size)}</span><button aria-label={`Remove ${a.name}`} onClick={()=>setAtts(list=>list.filter((_,j)=>j!==i))}><Icon name="close" size={13} /></button></div>)}</div>}
+      {error && <p role="alert" className="text-xs text-red-600 mt-5 leading-relaxed">{error}</p>}
+    </div><div className="compose-footer"><button className="primary-button" disabled={sending || !to || offline} onClick={send}><Icon name="sent" size={16} />{sending?'Sending…':'Send message'}</button><button className="secondary-button" disabled={sending} onClick={async()=>{if(desktop){await save()}else{setError('');const r=await api('/api/mail/draft'+q({account}),{method:'POST',body:JSON.stringify(payload())});setSaveStatus(r.ok?'Saved to mailbox Drafts':'');if(!r.ok)setError(r.error)}}}>Save draft</button><span role="status" className="text-[10px] text-[color:var(--muted)] ml-auto">{offline?'Offline · ':''}{saveStatus}</span></div>
+  </div>
 }

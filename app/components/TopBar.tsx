@@ -1,107 +1,40 @@
 'use client'
-import { useState } from 'react'
-import { Account, Avatar, Mark, avatarColor, initials } from '@/lib/client-utils'
-
-// The mail server hosting a mailbox, derived from its address. Its self-service
-// portal is where app passwords are created and the mailbox password changed.
-const mailServerUrl = (email: string) => {
-  const domain = (email.split('@')[1] || '').toLowerCase()
-  return domain ? `https://mail.${domain.replace(/^mail\./, '')}/` : 'https://mail.zeroaitech.tech/'
-}
-
-export function TopBar({
-  accounts, activeAccount, activeEmail, activeLabel, email, avatar,
-  onSwitchAccount, onAddAccount, onEditAccount,
-  search, onSearch,
-  onCompose,
-  onShowKeys, onShowProfile, onLogout,
-  panelState, onTogglePanel, onOpenDrawer,
-}: {
+import { useState, useEffect, useRef } from 'react'
+import { Account, Avatar, Mark } from '@/lib/client-utils'
+import { Icon } from './Icon'
+export function TopBar({ accounts, activeAccount, activeEmail, activeLabel, email, avatar, onSwitchAccount, onAddAccount, onEditAccount, search, onSearch, onCompose, onShowKeys, onShowProfile, onLogout, panelState, onTogglePanel, onOpenDrawer, offline, dark, onTheme }: {
   accounts: Account[]; activeAccount: string; activeEmail: string; activeLabel: string; email: string; avatar: string
   onSwitchAccount: (id: string) => void; onAddAccount: () => void; onEditAccount: (id: string) => void
-  search: string; onSearch: (v: string) => void
-  onCompose: () => void
+  search: string; onSearch: (v: string) => void; onCompose: () => void
   onShowKeys: () => void; onShowProfile: () => void; onLogout: () => void
-  panelState: { spaces: boolean; context: boolean; ai: boolean }
-  onTogglePanel: (p: 'spaces' | 'context' | 'ai') => void
-  /** Phones have no room for a folder column, so the same control opens a drawer. */
-  onOpenDrawer: () => void
+  panelState: { spaces: boolean; context: boolean; ai: boolean }; onTogglePanel: (p: 'spaces' | 'context' | 'ai') => void; onOpenDrawer: () => void
+  offline: boolean; dark: boolean; onTheme: () => void
 }) {
-  const [acctMenu, setAcctMenu] = useState(false)
-  const [profMenu, setProfMenu] = useState(false)
-  const toggleBtn = 'w-8 h-8 rounded-lg grid place-items-center text-sm hover:bg-white/5 transition shrink-0'
-
-  return (
-    <header className="relative z-40 h-14 md:h-[72px] shrink-0 flex items-center gap-2 md:gap-3 px-3 md:px-4" style={{ borderBottom: '1px solid var(--line)' }}>
-      <button onClick={onOpenDrawer} title="Folders" aria-label="Folders" className={toggleBtn + ' md:hidden text-[color:var(--muted)]'}>☰</button>
-      <button onClick={() => onTogglePanel('spaces')} title="Toggle Spaces" className={toggleBtn + ' hidden md:grid' + (panelState.spaces ? ' text-white' : ' text-[color:var(--muted)]')}>☰</button>
-      <div className="flex items-center gap-2 mr-0 md:mr-1 shrink-0"><Mark /><span className="font-extrabold tracking-tight text-[15px] hidden sm:inline">Zaim</span></div>
-
-      {/* Account switcher */}
-      <div className="relative shrink-0">
-        <button onClick={() => setAcctMenu((v) => !v)} className="flex items-center gap-2 rounded-xl pl-1.5 pr-2.5 py-1.5 hover:bg-white/5 transition text-left" style={{ border: '1px solid var(--line)' }}>
-          <span className="w-6 h-6 rounded-md grid place-items-center text-[10px] font-bold text-white shrink-0" style={{ background: avatarColor(activeEmail) }}>{initials(activeEmail)}</span>
-          <span className="min-w-0 hidden md:block"><span className="block text-xs font-semibold truncate max-w-[140px]">{activeLabel}</span></span>
-          <span className="text-[color:var(--muted)] text-[10px]">{acctMenu ? '▲' : '▼'}</span>
-        </button>
-        {acctMenu && (
-          <div className="absolute z-50 left-0 top-[42px] w-64 glass rounded-xl p-1.5 shadow-xl fade-in" style={{ border: '1px solid var(--line)' }}>
-            {accounts.map((a) => (
-              <div key={a.id} className={`group w-full flex items-center gap-1 rounded-lg pr-1 hover:bg-white/5 ${a.id === activeAccount ? 'bg-white/5' : ''}`}>
-                <button onClick={() => { onSwitchAccount(a.id); setAcctMenu(false) }} className="flex-1 min-w-0 flex items-center gap-2 px-2 py-2 text-left">
-                  <span className="w-6 h-6 rounded-md grid place-items-center text-[10px] font-bold text-white shrink-0" style={{ background: avatarColor(a.email) }}>{initials(a.email)}</span>
-                  <span className="min-w-0 flex-1"><span className="block text-xs font-semibold truncate">{a.label}</span><span className="block text-[10px] text-[color:var(--muted)] truncate">{a.email}</span></span>
-                  {a.id === activeAccount && <span className="text-[color:var(--accent)] text-xs">✓</span>}
-                </button>
-                <button onClick={() => { setAcctMenu(false); onEditAccount(a.id) }} title="Mailbox settings" className="w-7 h-7 rounded-md grid place-items-center text-[color:var(--muted)] hover:text-white hover:bg-white/10 shrink-0 opacity-0 group-hover:opacity-100 transition">⚙</button>
-              </div>
-            ))}
-            <button onClick={() => { setAcctMenu(false); onAddAccount() }} className="w-full text-left rounded-lg px-2 py-2 text-xs text-[color:var(--muted)] hover:bg-white/5 hover:text-white">+ Add another mailbox</button>
-          </div>
-        )}
+  const [menu, setMenu] = useState<'account' | 'profile' | null>(null)
+  const ref = useRef<HTMLElement>(null)
+  useEffect(() => {
+    function close(e: MouseEvent) { if (!ref.current?.contains(e.target as Node)) setMenu(null) }
+    function key(e: KeyboardEvent) { if (e.key === 'Escape') setMenu(null) }
+    document.addEventListener('mousedown', close); document.addEventListener('keydown', key)
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', key) }
+  }, [])
+  return <header className="mail-topbar" ref={ref}>
+    <button className="icon-button md:hidden" aria-label="Folders" onClick={onOpenDrawer}><Icon name="menu" /></button>
+    <button className="icon-button hidden md:flex" aria-label="Toggle folders" aria-pressed={panelState.spaces} onClick={() => onTogglePanel('spaces')}><Icon name="menu" /></button>
+    <div className="mail-brand"><Mark /><span>Zaim<span className="brand-byline">by ZeroAI</span></span></div>
+    <div className="relative"><button className="account-trigger" aria-label="Switch mailbox" aria-expanded={menu === 'account'} onClick={() => setMenu(menu === 'account' ? null : 'account')}><span className="hidden lg:block">{activeLabel}</span><Icon name="chevron" size={15} /></button>
+      {menu === 'account' && <div className="mail-menu account-menu">{accounts.map(account => <div key={account.id} className="flex items-center"><button className="flex-1 min-w-0" onClick={() => { onSwitchAccount(account.id); setMenu(null) }}><span className="block font-semibold truncate">{account.label}</span><span className="block text-xs truncate text-[color:var(--muted)]">{account.email}</span></button>{account.id === activeAccount && <Icon name="check" />}<button aria-label={`Settings for ${account.label}`} onClick={() => { onEditAccount(account.id); setMenu(null) }}><Icon name="settings" size={16} /></button></div>)}<button onClick={() => { setMenu(null); onAddAccount() }}>Add another mailbox</button></div>}
+    </div>
+    <label className="mail-search hidden md:flex"><Icon name="search" size={17} /><input id="zaim-search" aria-label="Search this folder" value={search} onChange={e => onSearch(e.target.value)} placeholder="Search mail in this folder" /><kbd>⌘ F</kbd></label>
+    <div className="ml-auto flex items-center gap-1 sm:gap-2">
+      <span className={'mail-status hidden lg:flex ' + (offline ? 'is-offline' : '')}><span />{offline ? 'Cached mail' : 'Mailbox'}</span>
+      <button className="primary-button compose-trigger" aria-label="Compose" onClick={onCompose}><Icon name="compose" size={17} /><span className="hidden sm:inline">Compose</span></button>
+      <button className="icon-button hidden lg:flex" aria-label="Toggle contact details" aria-pressed={panelState.context} onClick={() => onTogglePanel('context')}><Icon name="info" /></button>
+      <button className="icon-button hidden lg:flex" aria-label="Toggle assistant" aria-pressed={panelState.ai} onClick={() => onTogglePanel('ai')}><Icon name="bot" /></button>
+      <button className="icon-button" aria-label={dark ? 'Use light theme' : 'Use dark theme'} onClick={onTheme}><Icon name={dark ? 'sun' : 'moon'} /></button>
+      <div className="relative"><button className="profile-trigger" aria-label="Profile menu" aria-expanded={menu === 'profile'} onClick={() => setMenu(menu === 'profile' ? null : 'profile')}><Avatar src={avatar} name={email} cls="w-8 h-8 rounded-full" /></button>
+        {menu === 'profile' && <div className="mail-menu profile-menu"><p>{email}</p><button onClick={() => { setMenu(null); onShowProfile() }}>Edit profile picture</button><a href={`https://mail.${activeEmail.split('@')[1] || 'zeroaitech.tech'}/`} target="_blank" rel="noopener noreferrer">Mailbox settings</a><button onClick={() => { setMenu(null); onShowKeys() }}>Connect an agent</button><button className="text-red-600" onClick={onLogout}>Sign out</button></div>}
       </div>
-
-      {/* Search — filters the currently loaded conversation list by subject/sender */}
-      <div className="hidden md:block flex-1 max-w-xl mx-2">
-        <div className="flex items-center gap-2 rounded-xl px-3 h-9" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }}>
-          <span className="text-[color:var(--muted)] text-sm">⌕</span>
-          <input id="zaim-search" value={search} onChange={(e) => onSearch(e.target.value)} placeholder="Search this folder…" className="flex-1 bg-transparent text-sm outline-none placeholder:text-[color:var(--muted)]" />
-          {search && <button onClick={() => onSearch('')} className="text-[color:var(--muted)] hover:text-white text-xs">✕</button>}
-        </div>
-      </div>
-
-      <div className="flex-1 md:hidden" />
-      <button onClick={onCompose} aria-label="Compose"
-        className="accent-grad text-white font-bold rounded-xl px-3 md:px-4 py-2 text-sm hover:opacity-90 transition shrink-0">
-        ✏️<span className="hidden md:inline"> Compose</span>
-      </button>
-
-      <button onClick={() => onTogglePanel('context')} title="Toggle context panel" className={toggleBtn + ' hidden md:grid' + (panelState.context ? ' text-white' : ' text-[color:var(--muted)]')}>ⓘ</button>
-      <button onClick={() => onTogglePanel('ai')} title="Toggle AI assistant" className={toggleBtn + ' hidden md:grid' + (panelState.ai ? ' text-white' : ' text-[color:var(--muted)]')}>✦</button>
-
-      {/* Profile */}
-      <div className="relative ml-1">
-        <button onClick={() => setProfMenu((v) => !v)} className="rounded-full hover:opacity-80 transition shrink-0">
-          <Avatar src={avatar} name={email} cls="w-8 h-8 rounded-full text-[11px]" />
-        </button>
-        {profMenu && (
-          <div className="absolute z-50 right-0 top-[42px] w-56 glass rounded-xl p-1.5 shadow-xl fade-in" style={{ border: '1px solid var(--line)' }}>
-            <div className="px-2.5 py-2 text-xs text-[color:var(--muted)] truncate">{email}</div>
-            <button onClick={() => { setProfMenu(false); onShowProfile() }} className="w-full text-left rounded-lg px-2.5 py-2 text-xs hover:bg-white/5">✎ Edit profile picture</button>
-            {/* App passwords live on the mail server, not here: Stalwart lets a
-                mailbox owner create them in its own portal and deliberately does
-                not let anyone — including an administrator — create one on their
-                behalf. So this links there rather than pretending to manage them. */}
-            <a href={mailServerUrl(activeEmail)} target="_blank" rel="noopener noreferrer"
-               onClick={() => setProfMenu(false)}
-               className="block w-full text-left rounded-lg px-2.5 py-2 text-xs hover:bg-white/5">
-              🔐 App passwords &amp; mailbox settings ↗
-            </a>
-            <button onClick={() => { setProfMenu(false); onShowKeys() }} className="w-full text-left rounded-lg px-2.5 py-2 text-xs hover:bg-white/5">🤖 Connect an agent</button>
-            <button onClick={onLogout} className="w-full text-left rounded-lg px-2.5 py-2 text-xs text-red-400 hover:bg-white/5">Sign out</button>
-          </div>
-        )}
-      </div>
-    </header>
-  )
+    </div>
+  </header>
 }

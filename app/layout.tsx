@@ -4,7 +4,7 @@ import './globals.css'
 export const metadata: Metadata = {
   metadataBase: new URL('https://zaim.zeroaitech.tech'),
   title: 'Zaim — secure mail, agent-ready',
-  description: 'A stylish, secure mail client with an agent API. Human webapp + CLI + AI control. By ZeroAI.',
+  description: 'A focused email workspace for people and agents. Read downloaded mail and save drafts offline in the desktop app. Web, desktop, CLI and MCP by ZeroAI Technologies.',
   icons: { icon: '/icon.svg' },
 }
 

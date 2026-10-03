@@ -1,79 +1,20 @@
 'use client'
-import { Att, ComposeInit, Full, Account, Folder, Avatar, emailOf, fmtSize, q, linkifyText } from '@/lib/client-utils'
+import { useEffect, useState } from 'react'
+import { ComposeInit, Full, Folder, Avatar, fmtSize, q, linkifyText } from '@/lib/client-utils'
 import { Compose } from './Compose'
-
-function Empty() {
-  return <div className="h-full grid place-items-center text-center px-8"><div className="opacity-70">
-    <div className="mx-auto mb-4 w-14 h-14 rounded-2xl accent-grad grid place-items-center text-white text-2xl font-black">Z</div>
-    <div className="font-bold text-lg">Select a message</div><div className="text-sm text-[color:var(--muted)] mt-1">Secure mail, ready for you and your agents.</div>
-  </div></div>
-}
-
-export function ReadingCanvas({
-  sel, selUid, activeFolder, folders, activeAccount, loadingDraft, onEditDraft, deleting, onDelete, onReply,
-  compose, from, account, onComposeClose, onComposeSent, onBack,
-}: {
-  sel: Full | null; selUid: number | null; activeFolder: string; folders: Folder[]; activeAccount: string
-  loadingDraft: boolean; onEditDraft: () => void; deleting: boolean; onDelete: () => void; onReply: () => void
-  compose: ComposeInit | null; from?: string; account: string; onComposeClose: () => void; onComposeSent: () => void
-  /** Returns a phone to the message list; the list is a sibling column on desktop. */
-  onBack: () => void
+import { Icon } from './Icon'
+export function ReadingCanvas({ sel, selUid, activeFolder, folders, activeAccount, loadingDraft, onEditDraft, deleting, onDelete, onReply, compose, from, account, onComposeClose, onComposeSent, onBack, desktop, offline, error }: {
+  sel:Full|null; selUid:number|null; activeFolder:string; folders:Folder[]; activeAccount:string; loadingDraft:boolean; onEditDraft:()=>void; deleting:boolean; onDelete:()=>void; onReply:()=>void; compose:ComposeInit|null; from?:string; account:string; onComposeClose:()=>void; onComposeSent:()=>void; onBack:()=>void; desktop:boolean; offline:boolean; error:string
 }) {
-  if (compose) return <Compose initial={compose} from={from} account={account} onClose={onComposeClose} onSent={onComposeSent} />
-  if (!sel && selUid == null) return <Empty />
-  if (!sel && selUid != null) return <div className="p-8 text-sm text-[color:var(--muted)]">Opening…</div>
-
-  return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-[900px] mx-auto px-4 py-5 sm:px-8 sm:py-10 fade-in">
-        <button onClick={onBack}
-          className="md:hidden -ml-1 mb-3 flex items-center gap-1.5 text-sm font-semibold py-1.5 pr-3 rounded-lg hover:bg-white/5"
-          style={{ color: 'var(--muted)' }}>
-          <span aria-hidden>‹</span> All mail
-        </button>
-        <h2 className="text-xl sm:text-2xl font-bold leading-snug">{sel!.subject}</h2>
-        <div className="flex items-center gap-3 mt-4 pb-4 sm:mt-5 sm:pb-6" style={{ borderBottom: '1px solid var(--line)' }}>
-          <Avatar email={emailOf(sel!.from)} name={sel!.fromName || sel!.from} cls="w-9 h-9 sm:w-11 sm:h-11 rounded-full text-sm shrink-0" txt="text-sm" />
-          <div className="min-w-0"><div className="text-sm font-semibold truncate">{sel!.fromName || sel!.from}</div><div className="text-xs text-[color:var(--muted)] truncate">{sel!.from} · to {sel!.to}</div></div>
-          <span className="ml-auto text-xs text-[color:var(--muted)] shrink-0 hidden sm:inline">{new Date(sel!.date).toLocaleString()}</span>
-          {activeFolder === 'drafts'
-            ? <button onClick={onEditDraft} disabled={loadingDraft} className="text-xs font-semibold px-3 py-1.5 rounded-lg accent-grad text-white hover:opacity-90 disabled:opacity-50 shrink-0">{loadingDraft ? 'Loading…' : '✏️ Edit & Send'}</button>
-            : <button data-testid="reply-button" onClick={onReply} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 shrink-0">↩ Reply</button>}
-          <button data-testid="delete-button" onClick={() => onDelete()} disabled={deleting} title={activeFolder === 'trash' ? 'Delete permanently' : 'Move to Trash'}
-            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 hover:text-red-400 disabled:opacity-50 shrink-0">{deleting ? 'Deleting…' : '🗑 Delete'}</button>
-        </div>
-
-        {sel!.attachments && sel!.attachments.length > 0 && (
-          <div className="flex flex-wrap gap-2 py-4" style={{ borderBottom: '1px solid var(--line)' }}>
-            {sel!.attachments.map((a, i) => (
-              <a key={i} download href={'/api/mail/attachment' + q({ uid: String(sel!.uid), mailbox: folders.find((f) => f.key === activeFolder)?.path || 'INBOX', index: String(i), account: activeAccount })}
-                className="flex items-center gap-2 rounded-lg pl-2.5 pr-3 py-1.5 text-xs hover:bg-white/5 transition" style={{ background: 'var(--panel-2)', border: '1px solid var(--line)' }}>
-                <span className="text-sm">📎</span>
-                <span className="max-w-[220px] truncate font-medium">{a.filename}</span>
-                <span className="text-[color:var(--muted)]">{fmtSize(a.size)}</span>
-                <span className="text-[color:var(--accent)]">↓</span>
-              </a>
-            ))}
-          </div>
-        )}
-
-        <div className="rounded-2xl overflow-hidden mt-6" style={{ border: '1px solid var(--line)' }}>
-          {/* `<base target="_blank">` makes every link in the email open in a new
-              browser tab instead of navigating this sandboxed iframe to the
-              destination — which used to load the (often frame-busting)
-              confirmation page inside the tiny pane and appear to freeze.
-              sandbox stays script- and same-origin-locked; we only add popups so
-              those new-tab links can actually open, and let the opened tab
-              escape the sandbox so the real page works normally. */}
-          <iframe
-            title="message"
-            sandbox="allow-popups allow-popups-to-escape-sandbox"
-            className="w-full bg-white"
-            style={{ height: 'min(60vh, 520px)' }}
-            srcDoc={`<!doctype html><html><head><meta charset="utf-8"><base target="_blank"></head><body>${sel!.html || `<pre style="font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;font-size:14px;line-height:1.65;white-space:pre-wrap;word-wrap:break-word;padding:24px;margin:0;color:#111">${linkifyText(sel!.text || '')}</pre>`}</body></html>`}
-          />
-        </div>
-      </div>
+  const [remoteImages,setRemoteImages]=useState(false)
+  useEffect(()=>setRemoteImages(false),[selUid,activeAccount])
+  if(compose) return <Compose key={compose.localDraftId || compose.draft?.uid || `${account}:${compose.to}:${compose.subject}`} initial={compose} from={from} account={account} onClose={onComposeClose} onSent={onComposeSent} desktop={desktop} offline={offline} />
+  if(!sel) return <div className="reader-empty"><div><div className="empty-icon"><Icon name={error?'warning':'inbox'} size={36}/></div><h2>{error?'Message unavailable':selUid!=null?'Opening your message…':'A little room to focus.'}</h2><p>{error || 'Choose a conversation. Read, reply, and keep your work moving.'}</p>{selUid!=null && <button className="secondary-button" onClick={onBack}>Back to mailbox</button>}<small>{!error && 'Zaim / Your mail, thoughtfully organized.'}</small></div></div>
+  return <article className="mail-reader"><div className="reader-toolbar"><button className="md:hidden" aria-label="Back to mailbox" onClick={onBack}><Icon name="back" />Mail</button>{['drafts','local-drafts'].includes(activeFolder)?<button disabled={loadingDraft} onClick={onEditDraft}><Icon name="compose" />{loadingDraft?'Loading…':'Edit draft'}</button>:<button data-testid="reply-button" onClick={onReply}><Icon name="reply" />Reply</button>}<button data-testid="delete-button" disabled={deleting || (offline && activeFolder!=='local-drafts')} onClick={onDelete}><Icon name="trash" />{deleting?'Deleting…':'Delete'}</button><span className="ml-auto text-[10px] text-[color:var(--muted)] hidden sm:inline">{activeFolder==='local-drafts'?'Saved on this device':offline?'Cached copy':'Conversation'}</span></div>
+    <div className="reader-content"><h2>{sel.subject}</h2><div className="reader-sender"><Avatar name={sel.fromName||sel.from||'Local draft'} cls="w-10 h-10 rounded-xl"/><div className="min-w-0"><strong>{sel.fromName||sel.from||'Local draft'}</strong><p>{sel.from} · to {sel.to||'Not addressed'}</p></div><time>{new Date(sel.date).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</time></div>
+      {!!sel.attachments?.length && <div className="flex gap-2 flex-wrap mt-5">{sel.attachments.map((att,index)=><a key={index} className="mail-attachment" download href={'/api/mail/attachment'+q({uid:String(sel.uid),mailbox:folders.find(f=>f.key===activeFolder)?.path||'INBOX',index:String(index),account:activeAccount,offline:offline?'1':undefined})}><Icon name="attach" size={14}/><span>{att.filename}</span><span className="text-[color:var(--muted)]">{fmtSize(att.size)}</span></a>)}</div>}
+      <div className="flex items-center justify-between mt-6 mb-3 text-[10px] text-[color:var(--muted)]"><span>External images are {remoteImages?'enabled':'blocked'}.</span>{!offline && <button className="text-[color:var(--accent)]" onClick={()=>setRemoteImages(!remoteImages)}>{remoteImages?'Block external images':'Load external images'}</button>}</div>
+      <iframe title="Message content" sandbox="allow-popups allow-popups-to-escape-sandbox" className="w-full bg-white rounded-lg" style={{height:'min(65vh,650px)',border:'1px solid var(--line)'}} srcDoc={`<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data: cid: ${remoteImages?'https:':''}; font-src data:; base-uri 'none'; form-action 'none'"><base target="_blank"></head><body style="margin:0;padding:24px;font-family:system-ui;font-size:14px;line-height:1.8;color:#172338;overflow-wrap:anywhere">${sel.html || `<pre style="font:inherit;white-space:pre-wrap;margin:0">${linkifyText(sel.text||'')}</pre>`}</body></html>`}/>
     </div>
-  )
+  </article>
 }

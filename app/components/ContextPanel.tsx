@@ -32,10 +32,7 @@ export function ContextPanel({ sel, messages }: { sel: Full | null; messages: Ms
         </div>
       </div>
 
-      <div>
-        <div className="text-[10px] font-bold uppercase tracking-wider text-[color:var(--muted)] mb-2">Coming later</div>
-        <p className="text-[11px] text-[color:var(--muted)] leading-relaxed">Company/contact profiles, invoices, calendar, and shared files need their own data sources (a contacts store, calendar sync, a documents index) that don't exist yet — this panel will grow into those once those exist, rather than showing placeholder data now.</p>
-      </div>
+
     </div>
   )
 }

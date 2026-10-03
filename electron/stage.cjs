@@ -25,3 +25,8 @@ for (const [src, dst] of [
 for (const m of ['better-sqlite3']) fs.rmSync(path.join(st, 'node_modules', m), { recursive: true, force: true })
 console.log(`  standalone at ${st}`)
 console.log('  staged static + public; dropped native modules from standalone (use app-root rebuild)')
+
+// Build-time env files must never become installer contents.
+for (const folder of [base, st]) for (const name of fs.readdirSync(folder)) {
+  if (/^\.env(?:\.|$)/.test(name)) fs.rmSync(path.join(folder, name), { force: true })
+}

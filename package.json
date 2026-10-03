@@ -13,11 +13,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint",
+    "lint": "tsc --noEmit",
     "cli": "node ./bin/zaim.mjs",
     "mcp": "node ./bin/zaim-mcp.mjs",
     "desktop:dev": "next build && electron .",
-    "desktop:dist": "next build && node electron/stage.cjs && electron-builder"
+    "desktop:dist": "next build && node electron/stage.cjs && electron-builder",
+    "test:offline": "node scripts/test-offline.cjs"
   },
   "dependencies": {
     "@composio/core": "^0.14.0",
@@ -59,7 +60,13 @@
       "nndb/**",
       ".next/standalone/**",
       "package.json",
-      "!**/*.map"
+      "!**/*.map",
+      "!**/.env",
+      "!**/.env.*",
+      "!**/*.db",
+      "!**/*.sqlite",
+      "!**/*-wal",
+      "!**/*-shm"
     ],
     "directories": {
       "output": "release",

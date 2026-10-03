@@ -1,3 +1,4 @@
+import { cachedRead, cacheScope, mailCacheKey, folderGeneration } from '@/lib/offline-store'
 import { json } from '@/lib/auth'
 import { resolveForRequest } from '@/lib/resolve'
 import { getAttachment } from '@/lib/mail'
@@ -15,11 +16,17 @@ export async function GET(req: Request) {
   const mailbox = url.searchParams.get('mailbox') || 'INBOX'
   const index = parseInt(url.searchParams.get('index') || '0', 10)
   try {
-    const a = await getAttachment(r.ctx.account, uid, mailbox, index)
+    const scope = cacheScope(r.ctx.account, r.ctx.userId)
+    const result = await cachedRead(scope, mailCacheKey(scope, mailbox, `attachment:${mailbox}:${uid}:${index}`), async () => {
+      const a = await getAttachment(r.ctx.account, uid, mailbox, index, value => folderGeneration(scope, mailbox, value))
+      return a ? { ...a, content: a.content.toString('base64') } : null
+    }, url.searchParams.get('offline') === '1')
+    const a = result.value
     if (!a) return json({ error: 'Attachment not found' }, 404)
-    return new Response(new Uint8Array(a.content), {
+    return new Response(new Uint8Array(Buffer.from(a.content, 'base64')), {
       headers: {
         'content-type': a.contentType,
+        'X-Zaim-Cached': String(result.cached),
         'content-disposition': `attachment; filename="${a.filename.replace(/"/g, '')}"`,
       },
     })

@@ -1,12 +1,19 @@
 // Zaim desktop shell. Boots the Next.js standalone server locally (so the full
 // secure mail app — IMAP/SMTP, encrypted vault — runs on the device), then opens
 // it in a native window. Secrets + the SQLite vault live in the OS app-data dir.
-const { app, BrowserWindow, Menu, screen, shell } = require('electron')
+const { app, BrowserWindow, Menu, screen, shell, dialog } = require('electron')
 const { spawn, execFileSync } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
 const crypto = require('node:crypto')
 const http = require('node:http')
+
+// Optional isolated/portable profile; defaults to the normal OS application data.
+if (process.env.ZAIM_USER_DATA_DIR) {
+  const profile = path.resolve(process.env.ZAIM_USER_DATA_DIR)
+  fs.mkdirSync(profile, { recursive: true })
+  app.setPath('userData', profile)
+}
 
 // main.cjs lives at <root>/electron/main.cjs in both dev and the packaged app
 // (electron-builder places app files under Resources/app/), so root is one up.
@@ -37,12 +44,16 @@ function findStandalone() {
 const { dir: STANDALONE, server: SERVER } = findStandalone()
 const NNDB_SERVER = path.join(ROOT, 'nndb', 'src', 'serve.mjs')
 const NNDB_INIT = path.join(ROOT, 'nndb', 'bin', 'init-db.mjs')
-const PORT = 34117
+const configuredPort = Number(process.env.ZAIM_PORT || 34117)
+const PORT = Number.isInteger(configuredPort) && configuredPort >= 1024 && configuredPort < 65535 ? configuredPort : 34117
 // Loopback only, and a different port from the mail server so a stale process
 // from either half cannot be mistaken for the other.
-const NNDB_PORT = 34118
+const NNDB_PORT = PORT + 1
+const launchId = crypto.randomUUID()
 let child = null
 let nndbChild = null
+let nndbInitChild = null
+let closing = false
 
 // Next standalone doesn't bundle static/public — place them next to server.js.
 function stageAssets() {
@@ -71,6 +82,9 @@ function machineEnv() {
   if (changed) fs.writeFileSync(file, JSON.stringify(s), { mode: 0o600 })
   return {
     ...s,
+    ZAIM_DESKTOP: '1',
+    // Desktop must not inherit cloud database configuration from a development shell.
+    POSTGRES_URL: '', DATABASE_URL: '', CLOUDFLARE_ACCOUNT_ID: '', D1_DATABASE_ID: '', CLOUDFLARE_API_TOKEN: '', VERCEL: '',
     ZAIM_DB_PATH: path.join(dir, 'zaim.db'),
     // Which mail server is ours.
     //
@@ -105,8 +119,12 @@ function machineEnv() {
 function startNndb(env) {
   try {
     // Schema first. Cheap, idempotent, and creates the database on first run.
-    const init = spawn(process.execPath, [NNDB_INIT], { env, cwd: ROOT })
-    init.on('close', () => {
+    if (!fs.existsSync(NNDB_INIT) || !fs.existsSync(NNDB_SERVER)) return
+    const init = nndbInitChild = spawn(process.execPath, [NNDB_INIT], { env, cwd: ROOT })
+    init.on('error', e => console.error('[nndb:init]', e.message))
+    init.on('close', code => {
+      nndbInitChild = null
+      if (closing || code !== 0) return
       nndbChild = spawn(process.execPath, [NNDB_SERVER], { env, cwd: ROOT })
       nndbChild.stdout.on('data', (d) => process.stdout.write('[nndb] ' + d))
       nndbChild.stderr.on('data', (d) => process.stderr.write('[nndb] ' + d))
@@ -173,7 +191,7 @@ function looksLikeOurChild(pid) {
   // Next renames its own process title, so the recorded pid does not show the
   // path we spawned — it reads "next-server (v15.5.20)". Matching only on the
   // path we passed to spawn silently skips the one child that holds the port.
-  return out.includes(SERVER) || out.includes(NNDB_SERVER) || /\bnext-server\b/.test(out)
+  return out.includes(SERVER) || out.includes(NNDB_SERVER)
 }
 
 async function reapOrphans() {
@@ -207,19 +225,34 @@ function startServer() {
   const env = {
     ...process.env, ...m,
     PORT: String(PORT), HOSTNAME: '127.0.0.1', NODE_ENV: 'production',
-    ZAIM_LOCAL_HTTP: '1', ELECTRON_RUN_AS_NODE: '1',
+    ZAIM_LOCAL_HTTP: '1', ZAIM_INSTANCE: launchId, ELECTRON_RUN_AS_NODE: '1',
     // Where the Next server reaches the cognitive layer.
     NNDB_URL: `http://127.0.0.1:${NNDB_PORT}`,
   }
-  startNndb({ ...env, NNDB_PORT: String(NNDB_PORT) })
+  if (process.env.ZAIM_DISABLE_AI !== '1') startNndb({ ...env, NNDB_PORT: String(NNDB_PORT) })
   child = spawn(process.execPath, [SERVER], { env, cwd: STANDALONE })
+  child.on('error', e => { dialog.showErrorBox('Zaim could not start', e.message); app.quit() })
   child.stdout.on('data', (d) => process.stdout.write('[zaim] ' + d))
   child.stderr.on('data', (d) => process.stderr.write('[zaim] ' + d))
-  recordChildren([child.pid, nndbChild?.pid])
+  recordChildren([child.pid, nndbChild?.pid, nndbInitChild?.pid])
 }
 
 function whenReady(cb, tries = 0) {
-  http.get(`http://127.0.0.1:${PORT}/`, () => cb()).on('error', () => (tries < 80 ? setTimeout(() => whenReady(cb, tries + 1), 250) : cb()))
+  const retry = () => {
+    if (tries >= 120 || (child && child.exitCode !== null)) {
+      dialog.showErrorBox('Zaim could not start', 'The local mail server did not become ready. Quit and reopen Zaim. Your saved mail and drafts have not been removed.'); app.quit(); return
+    }
+    setTimeout(() => whenReady(cb, tries + 1), 250)
+  }
+  const req = http.get(`http://127.0.0.1:${PORT}/api/desktop/health`, response => {
+    let data = ''; response.on('data', chunk => data += chunk)
+    response.on('end', () => {
+      try { if (response.statusCode === 200 && JSON.parse(data).instance === launchId) return cb() } catch {}
+      retry()
+    })
+  })
+  req.setTimeout(1500, () => req.destroy())
+  req.on('error', retry)
 }
 
 /**
@@ -361,10 +394,10 @@ function createWindow() {
     width: state.width, height: state.height,
     ...(Number.isFinite(state.x) ? { x: state.x, y: state.y } : {}),
     minWidth: 900, minHeight: 600,
-    backgroundColor: '#08090d', title: 'Zaim',
+    backgroundColor: '#f5f7fa', title: 'Zaim',
     // Do not paint an empty window while the local server is still starting.
     show: false,
-    webPreferences: { contextIsolation: true },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
   })
   if (state.maximised) win.maximize()
   win.once('ready-to-show', () => win.show())
@@ -406,20 +439,22 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(async () => {
     if (!fs.existsSync(SERVER)) {
-      console.error(`[zaim] standalone server not found at ${SERVER}. The build is incomplete.`)
+      dialog.showErrorBox('Zaim could not start', 'The installed app is missing its mail server. Reinstall the complete desktop package.'); app.quit(); return
     }
     stageAssets()
     buildMenu()
     await reapOrphans()
+    if (await portBusy(PORT)) { dialog.showErrorBox('Zaim could not start', 'Another process is using the local mail port. Close the other Zaim instance or restart your computer.'); app.quit(); return }
     startServer()
     whenReady(createWindow)
     app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
   })
 }
 function stopChildren() {
-  for (const c of [child, nndbChild]) { try { c && c.kill() } catch { /* already gone */ } }
+  closing = true
+  for (const c of [child, nndbChild, nndbInitChild]) { try { c && c.kill() } catch { /* already gone */ } }
 }
-app.on('window-all-closed', () => { stopChildren(); if (process.platform !== 'darwin') app.quit() })
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') { stopChildren(); app.quit() } })
 app.on('quit', stopChildren)
 // A terminal Ctrl+C or a `kill` reaches the shell but not its children, and the
 // pair left behind is what holds the ports next time.

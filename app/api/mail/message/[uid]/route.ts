@@ -1,3 +1,4 @@
+import { cachedRead, cacheScope, removeLocal, mailCacheKey, folderGeneration } from '@/lib/offline-store'
 import { json } from '@/lib/auth'
 import { resolveForRequest } from '@/lib/resolve'
 import { getMessage, deleteMessage, moveMessage } from '@/lib/mail'
@@ -12,9 +13,11 @@ export async function GET(req: Request, ctx: { params: Promise<{ uid: string }> 
   const { uid } = await ctx.params
   const mailbox = new URL(req.url).searchParams.get('mailbox') || 'INBOX'
   try {
-    const msg = await getMessage(r.ctx.account, parseInt(uid, 10), mailbox)
+    const scope = cacheScope(r.ctx.account, r.ctx.userId)
+    const result = await cachedRead(scope, mailCacheKey(scope, mailbox, `message:${mailbox}:${uid}`), () => getMessage(r.ctx.account, parseInt(uid, 10), mailbox, { markSeen: new URL(req.url).searchParams.get('download') !== '1', onGeneration: value => folderGeneration(scope, mailbox, value) }), new URL(req.url).searchParams.get('offline') === '1')
+    const msg = result.value
     if (!msg) return json({ ok: false, error: 'Message not found' }, 404)
-    return json({ ok: true, message: msg })
+    return json({ ok: true, message: msg, cached: result.cached, savedAt: result.savedAt })
   } catch (e) {
     return json({ ok: false, error: (e as Error).message }, 502)
   }
@@ -34,6 +37,9 @@ export async function DELETE(req: Request, ctx: { params: Promise<{ uid: string 
   try {
     if (to && to !== mailbox) await moveMessage(r.ctx.account, mailbox, parseInt(uid, 10), to)
     else await deleteMessage(r.ctx.account, mailbox, parseInt(uid, 10))
+    removeLocal(cacheScope(r.ctx.account, r.ctx.userId), mailCacheKey(cacheScope(r.ctx.account, r.ctx.userId), mailbox, `message:${mailbox}:${uid}`)())
+    // Discard cached lists after a successful mutation so deleted mail cannot reappear.
+    for (const flagged of [true, false]) for (let page = 1; page <= 50; page++) removeLocal(cacheScope(r.ctx.account, r.ctx.userId), mailCacheKey(cacheScope(r.ctx.account, r.ctx.userId), mailbox, `list:${mailbox}:${flagged}:40:${page}`)())
     return json({ ok: true })
   } catch (e) {
     return json({ ok: false, error: (e as Error).message }, 502)

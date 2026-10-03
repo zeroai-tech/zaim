@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
 export type Msg = { uid: number; subject: string; from: string; fromName: string; to: string; date: string; seen: boolean; flagged: boolean }
 export type Full = Msg & { html: string | null; text: string | null; cc?: string; attachments?: { filename: string; contentType: string; size: number }[] }
 export type Att = { name: string; size: number; content: string; contentType: string }
-export type ComposeInit = { to: string; subject: string; cc?: string; html?: string; text?: string; attachments?: Att[]; draft?: { uid: number; mailbox: string } }
+export type ComposeInit = { to: string; subject: string; cc?: string; html?: string; text?: string; bcc?: string; localDraftId?: number; attachments?: Att[]; draft?: { uid: number; mailbox: string } }
 export type Account = { id: string; label: string; email: string; isDefault: boolean }
 export type Folder = { key: string; label: string; icon: string; path: string }
 export type SmartView = 'unread' | 'today' | null
@@ -18,10 +18,16 @@ export type SmartView = 'unread' | 'today' | null
 // Never throw: a rejected fetch (network drop, timeout) or a non-JSON error
 // page (e.g. a gateway timeout) used to reject silently, which left callers'
 // loading/sending state stuck forever since their `.then`/`finally` never ran.
-export const api = (path: string, init?: RequestInit) =>
-  fetch(path, { ...init, credentials: 'include', headers: { 'content-type': 'application/json', ...(init?.headers || {}) } })
-    .then((r) => r.json())
-    .catch(() => ({ ok: false, error: 'Network error — please try again.' }))
+export async function api(path: string, init?: RequestInit) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), path.includes('/mail/send') || path.includes('/auth/login') ? 65000 : 20000)
+  try {
+    const response = await fetch(path, { ...init, signal: init?.signal || controller.signal, credentials: 'include', cache: 'no-store', headers: { 'content-type': 'application/json', ...(init?.headers || {}) } })
+    const result = await response.json()
+    return response.ok ? result : { ...result, ok: false, status: response.status }
+  } catch { return { ok:false, error:'Connection unavailable. Please try again.', networkError:true } }
+  finally { clearTimeout(timer) }
+}
 export const q = (params: Record<string, string | undefined>) =>
   '?' + Object.entries(params).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v!)}`).join('&')
 
@@ -43,21 +49,11 @@ export const isToday = (d: string) => new Date(d).toDateString() === new Date().
 // Avatar: an explicitly-set picture (this user's own upload) wins; otherwise we
 // try the sender's Gravatar (free, per-address, works for anyone who has one);
 // otherwise a coloured initials badge. Falls back gracefully on any miss.
-export function Avatar({ src, email, name, cls, txt = 'text-xs' }: { src?: string | null; email?: string; name: string; cls: string; txt?: string }) {
-  const [grav, setGrav] = useState<string | null>(null)
-  const [bad, setBad] = useState(false)
-  useEffect(() => {
-    setBad(false)
-    if (src || !email || typeof crypto === 'undefined' || !crypto.subtle) { setGrav(null); return }
-    let on = true
-    crypto.subtle.digest('SHA-256', new TextEncoder().encode(email.trim().toLowerCase()))
-      .then((buf) => { if (on) setGrav('https://www.gravatar.com/avatar/' + [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('') + '?d=404&s=96') })
-      .catch(() => {})
-    return () => { on = false }
-  }, [src, email])
-  const use = src || grav
-  if (use && !bad) return <img src={use} alt="" onError={() => setBad(true)} className={`${cls} object-cover shrink-0`} />
-  return <span className={`${cls} grid place-items-center ${txt} font-bold text-white shrink-0`} style={{ background: avatarColor(name || email || '?') }}>{initials(name || email || '?')}</span>
+export function Avatar({ src, name, email, cls, txt = 'text-xs' }: { src?: string | null; email?: string; name: string; cls: string; txt?: string }) {
+  const [bad,setBad] = useState(false)
+  useEffect(()=>setBad(false),[src])
+  if(src && !bad) return <img src={src} alt="" onError={()=>setBad(true)} className={`${cls} object-cover shrink-0`} />
+  return <span className={`${cls} grid place-items-center ${txt} font-semibold text-white shrink-0`} style={{background:avatarColor(name||email||'?')}}>{initials(name||email||'?')}</span>
 }
 
 export function Mark({ big }: { big?: boolean }) { return <span className={`${big ? 'w-9 h-9 text-lg rounded-xl' : 'w-7 h-7 text-sm rounded-lg'} accent-grad grid place-items-center text-white font-black`}>Z</span> }

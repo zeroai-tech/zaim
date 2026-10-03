@@ -80,13 +80,13 @@ export function SignInForm({ onDone, autoFocus = false }: { onDone: () => void; 
       <div className="flex flex-col gap-3">
         <input
           className={field} style={line} autoFocus={autoFocus}
-          placeholder="you@yourdomain.com" autoComplete="username"
+          aria-label="Email address" type="email" placeholder="you@yourdomain.com" autoComplete="username"
           value={email} onChange={(e) => setEmail(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !busy && go()}
         />
         <input
           className={field} style={line} type="password"
-          placeholder="mailbox password" autoComplete="current-password"
+          aria-label="Mailbox password" placeholder="mailbox password" autoComplete="current-password"
           value={pw} onChange={(e) => setPw(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && !busy && !needsServer && go()}
         />
@@ -143,7 +143,7 @@ export function SignInForm({ onDone, autoFocus = false }: { onDone: () => void; 
 export function DesktopSignIn({ onDone }: { onDone: () => void }) {
   return (
     <div className="h-screen grid place-items-center px-6" style={{ background: 'var(--bg)' }}>
-      <div className="w-full max-w-sm">
+      <div className="w-full max-w-sm signin-card">
         <div className="flex items-center gap-2.5 mb-8">
           <Mark />
           <span className="font-extrabold text-lg tracking-tight">Zaim</span>
@@ -154,8 +154,7 @@ export function DesktopSignIn({ onDone }: { onDone: () => void }) {
 
         <h1 className="text-2xl font-bold tracking-tight">Sign in to your mailbox</h1>
         <p className="text-sm text-[color:var(--muted)] mt-2 mb-6 leading-relaxed">
-          Your email address and its password, the ones your mail server already knows.
-          There is no Zaim account to create.
+          Connect your existing email account. First-time sign-in needs a connection; downloaded mail and local drafts stay available afterwards.
         </p>
 
         <SignInForm onDone={onDone} autoFocus />

@@ -51,7 +51,7 @@ export interface MailFull extends MailSummary {
 export interface OAuthAuth { user: string; accessToken: string }
 
 interface ImapTimeouts { connectionTimeout: number; greetingTimeout: number; socketTimeout: number }
-const DEFAULT_TIMEOUTS: ImapTimeouts = { connectionTimeout: 20_000, greetingTimeout: 15_000, socketTimeout: 30_000 }
+const DEFAULT_TIMEOUTS: ImapTimeouts = process.env.ZAIM_DESKTOP === '1' ? { connectionTimeout: 5_000, greetingTimeout: 5_000, socketTimeout: 10_000 } : { connectionTimeout: 20_000, greetingTimeout: 15_000, socketTimeout: 30_000 }
 
 async function withImap<T>(account: MailAccount, fn: (c: ImapFlow) => Promise<T>, timeouts: ImapTimeouts = DEFAULT_TIMEOUTS): Promise<T> {
   const { imap } = account
@@ -101,10 +101,11 @@ export async function listFolders(account: MailAccount): Promise<FolderInfo[]> {
   })
 }
 
-export async function listMailbox(account: MailAccount, mailbox = "INBOX", limit = 40, opts?: { flaggedOnly?: boolean, page?: number }): Promise<MailSummary[]> {
+export async function listMailbox(account: MailAccount, mailbox = "INBOX", limit = 40, opts?: { flaggedOnly?: boolean, page?: number, onGeneration?: (value: string) => void }): Promise<MailSummary[]> {
   return withImap(account, async (c) => {
     const lock = await c.getMailboxLock(mailbox)
     try {
+      if (c.mailbox) opts?.onGeneration?.(String(c.mailbox.uidValidity))
       const total = (c.mailbox && typeof c.mailbox === 'object' ? c.mailbox.exists : 0) || 0
       if (!total) return []
       const out: MailSummary[] = []
@@ -155,15 +156,16 @@ export async function listMailbox(account: MailAccount, mailbox = "INBOX", limit
   })
 }
 
-export async function getMessage(account: MailAccount, uid: number, mailbox = "INBOX"): Promise<MailFull | null> {
+export async function getMessage(account: MailAccount, uid: number, mailbox = "INBOX", options?: { markSeen?: boolean; onGeneration?: (value: string) => void }): Promise<MailFull | null> {
   return withImap(account, async (c) => {
     const lock = await c.getMailboxLock(mailbox)
     try {
       const msg = await c.fetchOne(String(uid), { uid: true, source: true }, { uid: true })
       if (!msg || !msg.source) return null
       const parsed = await simpleParser(msg.source as Buffer)
-      // Mark read
-      await c.messageFlagsAdd({ uid: String(uid) }, ['\\Seen'], { uid: true }).catch(() => {})
+      if (c.mailbox) options?.onGeneration?.(String(c.mailbox.uidValidity))
+      // Background downloads must not mark unread messages as read.
+      if (options?.markSeen !== false) await c.messageFlagsAdd({ uid: String(uid) }, ['\\Seen'], { uid: true }).catch(() => {})
       return {
         uid,
         subject: parsed.subject || '(no subject)',
@@ -171,7 +173,7 @@ export async function getMessage(account: MailAccount, uid: number, mailbox = "I
         fromName: addrName(parsed.from),
         to: addrText(parsed.to),
         date: (parsed.date || new Date()).toISOString(),
-        seen: true,
+        seen: options?.markSeen !== false,
         flagged: false,
         html: parsed.html || null,
         text: parsed.text || null,
@@ -185,10 +187,11 @@ export async function getMessage(account: MailAccount, uid: number, mailbox = "I
 }
 
 // Fetch one attachment's bytes (by index) for download.
-export async function getAttachment(account: MailAccount, uid: number, mailbox = "INBOX", index = 0): Promise<{ filename: string; contentType: string; content: Buffer } | null> {
+export async function getAttachment(account: MailAccount, uid: number, mailbox = "INBOX", index = 0, onGeneration?: (value: string) => void): Promise<{ filename: string; contentType: string; content: Buffer } | null> {
   return withImap(account, async (c) => {
     const lock = await c.getMailboxLock(mailbox)
     try {
+      if (c.mailbox) onGeneration?.(String(c.mailbox.uidValidity))
       const msg = await c.fetchOne(String(uid), { uid: true, source: true }, { uid: true })
       if (!msg || !msg.source) return null
       const parsed = await simpleParser(msg.source as Buffer)

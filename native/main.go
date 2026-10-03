@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/webview/webview_go"
@@ -53,6 +54,8 @@ func getMachineEnv() map[string]string {
 		os.WriteFile(secretsFile, data, 0600)
 	}
 
+	secrets["ZAIM_DESKTOP"] = "1"
+	secrets["ZAIM_HOSTED_MAIL_HOST"] = "mail.zeroaitech.tech"
 	secrets["ZAIM_DB_PATH"] = filepath.Join(appDir, "zaim.db")
 	return secrets
 }

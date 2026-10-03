@@ -54,14 +54,15 @@ export async function GET(req: Request, ctx: { params: Promise<{ action: string 
       { id: MAILBOX_ACCOUNT_ID, label: mb.label || 'ZeroAI Mail', email: mb.email, isDefault: true },
       ...saved.filter((a) => a.email.toLowerCase() !== mb.email.toLowerCase()),
     ]
-    return json({ user: { id: uid || MAILBOX_ACCOUNT_ID, email: mb.email, avatar: user?.avatar ?? null }, accounts })
+    return json({ user: { id: uid || MAILBOX_ACCOUNT_ID, email: mb.email, avatar: user?.avatar ?? null }, accounts, desktop: process.env.ZAIM_DESKTOP === '1' })
   }
 
-  if (!uid) return json({ user: null })
+  if (!uid) return json({ user: null, desktop: process.env.ZAIM_DESKTOP === '1' })
   const u = await findUserById(uid)
-  if (!u) return json({ user: null })
+  if (!u) return json({ user: null, desktop: process.env.ZAIM_DESKTOP === '1' })
   const rows = await listAccounts(uid)
   return json({
+    desktop: process.env.ZAIM_DESKTOP === '1',
     user: { id: u.id, email: u.email, avatar: u.avatar ?? null },
     accounts: rows.map((a) => ({ id: a.id, label: a.label, email: a.from_email, isDefault: !!a.is_default })),
   })

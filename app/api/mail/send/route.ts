@@ -1,3 +1,4 @@
+import { cacheScope, deleteLocalDraft } from '@/lib/offline-store'
 import { json } from '@/lib/auth'
 import { resolveForRequest } from '@/lib/resolve'
 import { sendMail, appendToSent, deleteMessage } from '@/lib/mail'
@@ -41,6 +42,10 @@ export async function POST(req: Request) {
     if (draftResult.status === 'rejected') {
       draftWarning = 'Sent, but could not remove the original draft.'
       console.error('[mail/send] deleteMessage (draft cleanup) failed:', (draftResult.reason as Error)?.message)
+    }
+    if (Number.isSafeInteger(body.localDraftId) && body.localDraftId < 0) {
+      try { deleteLocalDraft(cacheScope(r.ctx.account, r.ctx.userId), body.localDraftId) }
+      catch { draftWarning = 'Sent, but the local draft could not be removed. Do not send it again.' }
     }
     return json({ ok: true, messageId, ...(sentWarning && { sentWarning }), ...(draftWarning && { draftWarning }) })
   } catch (e) {

@@ -63,7 +63,7 @@ export async function POST(req: Request) {
   const legacyMatch = !!key && provided.length === key.length && crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(key))
   if (!owner && !legacyMatch) return json({ error: 'Wrong key' }, 401)
 
-  const secure = process.env.NODE_ENV === 'production'
+  const secure = process.env.NODE_ENV === 'production' && process.env.ZAIM_LOCAL_HTTP !== '1'
   return new Response(JSON.stringify({ ok: true }), {
     status: 200,
     headers: {

@@ -14,6 +14,7 @@ import { AIPanel } from './components/AIPanel'
 import { VoicePanel } from './components/VoicePanel'
 import { Landing } from './components/Landing'
 import { DesktopSignIn } from './components/SignIn'
+import { Icon } from './components/Icon'
 import { isDesktop } from '@/lib/platform'
 
 export default function Zaim() {
@@ -42,16 +43,28 @@ export default function Zaim() {
   const [showProfile, setShowProfile] = useState(false)
   const [editAccount, setEditAccount] = useState<string | null>(null)
   const [reloadTick, setReloadTick] = useState(0) // bump to re-discover folders + reload mail (e.g. after repointing a mailbox's server)
-  const [panelState, setPanelState] = useState({ spaces: true, context: true, ai: false })
+  const [panelState, setPanelState] = useState({ spaces: true, context: false, ai: false })
   // Which single pane a phone is showing. Desktop ignores this entirely and
   // keeps every column visible.
   const [mobilePane, setMobilePane] = useState<'list' | 'reader'>('list')
   const [drawer, setDrawer] = useState(false)
   const [handoff, setHandoff] = useState<null | { want: string; current: string }>(null)
   const [legacySession, setLegacySession] = useState(false)
+  const [offline,setOffline] = useState(false)
+  const [listError,setListError] = useState('')
+  const [readerError,setReaderError] = useState('')
+  const [downloadStatus,setDownloadStatus] = useState('')
+  const [downloading,setDownloading] = useState(false)
+  const [dark,setDark] = useState(false)
+  const readSeq = useRef(0)
+  useEffect(()=>{try {const saved=localStorage.getItem('zaim-theme');setDark(saved==='dark');document.documentElement.dataset.theme=saved==='dark'?'dark':'light'}catch{}},[])
+  function toggleTheme(){setDark(value=>{const next=!value;document.documentElement.dataset.theme=next?'dark':'light';try{localStorage.setItem('zaim-theme',next?'dark':'light')}catch{}return next})}
+
 
   const refreshMe = useCallback(async () => {
     const me = await api('/api/auth/me')
+    if (typeof me.desktop === 'boolean') setDesktop(me.desktop)
+    if (me.networkError || me.error) { setListError(me.error || 'Could not reach your local mail server.'); setPhase('auth'); return }
     if (!me.user) { setPhase('auth'); return }
     setEmail(me.user.email)
     setAvatar(me.user.avatar || '')
@@ -99,9 +112,14 @@ export default function Zaim() {
   // Discover this account's real folders (Sent/Drafts/… differ per provider).
   useEffect(() => {
     if (phase !== 'app' || !activeAccount) return
-    setFolders([{ key: 'INBOX', label: 'Inbox', icon: '📥', path: 'INBOX' }])
-    api('/api/mail/folders' + q({ account: activeAccount })).then((r) => { if (r.ok) setFolders(r.folders) })
-  }, [phase, activeAccount, reloadTick])
+    let live=true
+    setFolders([{ key:'INBOX',label:'Inbox',icon:'inbox',path:'INBOX' }, ...(desktop ? [{key:'local-drafts',label:'Local drafts',icon:'draft',path:'local-drafts'}] : [])])
+    api('/api/mail/folders'+q({account:activeAccount,offline:offline?'1':undefined})).then(r=>{
+      if(!live)return
+      if(r.ok){setFolders([...r.folders,...(desktop?[{key:'local-drafts',label:'Local drafts',icon:'draft',path:'local-drafts'}]:[])]);if(r.cached)setOffline(true)}
+    })
+    return ()=>{live=false}
+  }, [phase, activeAccount, reloadTick, desktop])
 
   const [page, setPage] = useState(1)
   const [hasMore, setHasMore] = useState(false)
@@ -113,22 +131,24 @@ export default function Zaim() {
   // path for the active folder hasn't changed, which used to re-trigger a fully
   // redundant duplicate fetch of the same list right after the first one ran.
   const activeMailbox = folders.find((x) => x.key === activeFolder)?.path || 'INBOX'
-  const load = useCallback((isLoadMore = false) => {
+  const load = useCallback((isLoadMore = false, forceLive = false) => {
     if (!activeAccount) return
     const seq = ++loadSeq.current
     if (!isLoadMore) {
-      setListLoading(true); setSel(null); setSelUid(null)
+      setListLoading(true); setListError('')
     } else {
       setLoadingMore(true)
     }
     
     const targetPage = isLoadMore ? page + 1 : 1
-    api('/api/mail/list' + q({ limit: '40', page: String(targetPage), mailbox: activeMailbox, flagged: activeFolder === 'starred' ? '1' : undefined, account: activeAccount }))
+    api(activeFolder === 'local-drafts' ? '/api/local/drafts'+q({account:activeAccount}) : '/api/mail/list' + q({ offline: !forceLive && offline ? '1' : undefined, limit: '40', page: String(targetPage), mailbox: activeMailbox, flagged: activeFolder === 'starred' ? '1' : undefined, account: activeAccount }))
       .then((r) => { 
         if (seq === loadSeq.current) {
+          if(!r.ok){setListError(r.error || 'Could not refresh your mailbox.');setHasMore(false);return}
+          if(activeFolder !== 'local-drafts') setOffline(!!r.cached)
           const newMsgs = r.messages || []
           setMessages(isLoadMore ? (prev) => [...prev, ...newMsgs] : newMsgs)
-          setHasMore(newMsgs.length === 40)
+          setHasMore(activeFolder !== 'local-drafts' && newMsgs.length === 40)
           if (isLoadMore) setPage(targetPage)
           else setPage(1)
         }
@@ -139,7 +159,7 @@ export default function Zaim() {
           setLoadingMore(false)
         }
       })
-  }, [activeAccount, activeFolder, activeMailbox, page])
+  }, [activeAccount, activeFolder, activeMailbox, page, offline])
   
   useEffect(() => { if (phase === 'app') load() }, [phase, activeAccount, activeFolder, activeMailbox])
 
@@ -171,14 +191,47 @@ export default function Zaim() {
   }, [phase, load])
 
   async function open(uid: number) {
-    setSelUid(uid); setSel(null)
-    const f = folders.find((x) => x.key === activeFolder)
-    const r = await api(`/api/mail/message/${uid}` + q({ mailbox: f?.path || 'INBOX', account: activeAccount }))
-    if (r.ok) { setSel(r.message); setMessages((m) => m.map((x) => (x.uid === uid ? { ...x, seen: true } : x))) }
+    const sequence=++readSeq.current
+    setSelUid(uid);setSel(null);setReaderError('')
+    if(activeFolder==='local-drafts'){
+      const result=await api('/api/local/drafts'+q({account:activeAccount}))
+      const draft=result.drafts?.find((item:{id:number})=>item.id===uid)
+      if(sequence!==readSeq.current)return
+      if(!draft){setReaderError(result.error||'Local draft not found.');return}
+      setSel({uid:draft.id,subject:draft.subject||'(no subject)',from:email,fromName:'Local draft',to:draft.to,date:draft.updatedAt,seen:true,flagged:false,html:draft.html,text:null,cc:draft.cc})
+      return
+    }
+    const result=await api(`/api/mail/message/${uid}`+q({mailbox:activeMailbox,account:activeAccount,offline:offline?'1':undefined}))
+    if(sequence!==readSeq.current)return
+    if(result.ok){setSel(result.message);if(result.cached)setOffline(true);if(!result.cached)setMessages(list=>list.map(item=>item.uid===uid?{...item,seen:true}:item))}
+    else setReaderError(result.error||'This message has not been downloaded. Reconnect to load it.')
+  }
+  async function downloadFolder(){
+    setDownloading(true);setDownloadStatus('')
+    let downloaded=0
+    // Download only the currently loaded messages; do not change unread flags.
+    for(const message of messages){
+      const result=await api(`/api/mail/message/${message.uid}`+q({mailbox:activeMailbox,account:activeAccount,download:'1'}))
+      if(!result.ok || result.cached){setDownloadStatus('Download interrupted. Reconnect and try again.');break}
+      downloaded++
+      for(let index=0;index<(result.message.attachments?.length||0);index++){
+        const attachment=await fetch('/api/mail/attachment'+q({uid:String(message.uid),mailbox:activeMailbox,index:String(index),account:activeAccount}),{credentials:'include'})
+        if(!attachment.ok)setDownloadStatus('Some attachments could not be downloaded. Reconnect and retry.')
+      }
+    }
+    setDownloadStatus(previous=>previous||`${downloaded} messages and their available attachments saved on this device.`)
+    setDownloading(false)
   }
   // Load a draft (recipient, Cc, body, attachments) into the composer to send.
   async function editDraft() {
     if (!sel) return
+    if(activeFolder==='local-drafts'){
+      const result=await api('/api/local/drafts'+q({account:activeAccount}))
+      const draft=result.drafts?.find((item:{id:number})=>item.id===sel.uid)
+      if(draft)setCompose({to:draft.to,cc:draft.cc,bcc:draft.bcc,subject:draft.subject,html:draft.html,localDraftId:draft.id,attachments:(draft.attachments||[]).map((item:{filename:string;content:string;contentType:string})=>({name:item.filename,content:item.content,contentType:item.contentType,size:Math.floor(item.content.length*3/4)}))})
+      else setReaderError('Could not open this local draft.')
+      return
+    }
     setLoadingDraft(true)
     const mailbox = folders.find((f) => f.key === activeFolder)?.path || 'INBOX'
     const attachments: Att[] = []
@@ -188,7 +241,7 @@ export default function Zaim() {
     try {
       for (let i = 0; i < (sel.attachments?.length || 0); i++) {
         const meta = sel.attachments![i]
-        const res = await fetch('/api/mail/attachment' + q({ uid: String(sel.uid), mailbox, index: String(i), account: activeAccount }), { credentials: 'include' })
+        const res = await fetch('/api/mail/attachment' + q({ uid: String(sel.uid), mailbox, index: String(i), account: activeAccount, offline: offline?'1':undefined }), { credentials: 'include' })
         if (!res.ok) throw new Error(`Could not load attachment "${meta.filename}" — please try again.`)
         const blob = await res.blob()
         const content = await new Promise<string>((r) => { const fr = new FileReader(); fr.onload = () => r((fr.result as string).split(',')[1] || ''); fr.readAsDataURL(blob) })
@@ -210,6 +263,12 @@ export default function Zaim() {
     const target = uid ?? sel?.uid
     if (target == null) return
     const mailbox = folders.find((f) => f.key === activeFolder)?.path || 'INBOX'
+    if(activeFolder==='local-drafts'){
+      const result=await api('/api/local/drafts'+q({account:activeAccount,id:String(target)}),{method:'DELETE'})
+      if(result.ok){setSel(null);setSelUid(null);load()}else setReaderError(result.error)
+      return
+    }
+    if(offline){setReaderError('Reconnect before changing mail on the server.');return}
     const trash = folders.find((f) => f.key === 'trash')?.path
     const permanent = !trash || trash === mailbox
     if (permanent && !confirm('Permanently delete this message? This cannot be undone.')) return
@@ -237,9 +296,9 @@ export default function Zaim() {
     const r = await api(`/api/mail/message/${uid}` + q({ mailbox, account: activeAccount }))
     if (r.ok) setSel(r.message)
   }
-  async function logout() { await api('/api/auth/logout', { method: 'POST' }); setPhase('auth'); setMessages([]); setSel(null); setAccounts([]) }
+  async function logout() { setCompose(null); setOffline(false); await api('/api/auth/logout', { method: 'POST' }); setPhase('auth'); setMessages([]); setSel(null); setAccounts([]) }
   function togglePanel(p: 'spaces' | 'context' | 'ai') { setPanelState((s) => ({ ...s, [p]: !s[p] })) }
-  function selectFolder(key: string) { setSearch(''); setActiveFolder(key) }
+  function selectFolder(key: string) { setMobilePane('list');readSeq.current++;setSearch('');setActiveFolder(key);setMessages([]);setSel(null);setSelUid(null);setReaderError('');setListError('');setDownloadStatus('') }
 
   if (phase === 'loading') return <Splash desktop={desktop} />
   // The desktop app opens straight into sign-in. Showing the website here
@@ -266,20 +325,22 @@ export default function Zaim() {
   }
 
   return (
-    <div className="h-screen w-screen flex flex-col">
+    <div className="h-screen w-full flex flex-col">
       <TopBar
         accounts={accounts} activeAccount={activeAccount} activeEmail={active?.email || email} activeLabel={active?.label || 'Mailbox'}
         email={email} avatar={avatar}
-        onSwitchAccount={(id) => { setActiveAccount(id); setActiveFolder('INBOX'); setSmartView(null) }}
+        onSwitchAccount={(id) => { readSeq.current++;setSel(null);setSelUid(null);setMessages([]);setCompose(null);setReaderError('');setListError('');setActiveAccount(id); setActiveFolder('INBOX'); setSmartView(null) }}
         onAddAccount={() => setPhase('add-account')}
         onEditAccount={(id) => setEditAccount(id)}
         search={search} onSearch={setSearch}
         onCompose={() => { setCompose({ to: '', subject: '' }); showReader() }}
         onShowKeys={() => setShowKeys(true)} onShowProfile={() => setShowProfile(true)} onLogout={logout}
+        offline={offline} dark={dark} onTheme={toggleTheme}
         panelState={panelState} onTogglePanel={togglePanel} onOpenDrawer={() => setDrawer(true)}
       />
-      <div className="flex-1 flex overflow-hidden">
-        <Collapsible open={panelState.spaces} width={220}>
+      {(offline || downloadStatus) && <div className="connection-banner" role="status"><Icon name={offline?'cloud':'check'} size={15}/><span>{offline?'Working from downloaded mail. Local drafts are never sent automatically.':downloadStatus}</span>{offline && <button onClick={()=>{setOffline(false);setReloadTick(t=>t+1);load(false,true)}}>Reconnect & refresh</button>}{!offline && <button aria-label="Dismiss download status" onClick={()=>setDownloadStatus('')}><Icon name="close" size={14}/></button>}</div>}
+      <div className="flex-1 flex overflow-hidden min-h-0">
+        <Collapsible open={panelState.spaces} width={210}>
           <SpacesPanel folders={folders} activeFolder={activeFolder} smartView={smartView} onSelectFolder={selectFolder} onSelectSmartView={setSmartView} />
         </Collapsible>
         <Drawer open={drawer} onClose={() => setDrawer(false)}>
@@ -291,10 +352,11 @@ export default function Zaim() {
         </Drawer>
 
         <div
-          className={`w-full md:w-[360px] shrink-0 h-full ${mobilePane === 'reader' ? 'hidden md:block' : 'block'}`}
+          className={`w-full md:w-[340px] shrink-0 h-full ${mobilePane === 'reader' ? 'hidden md:block' : 'block'}`}
           style={{ borderRight: '1px solid var(--line)' }}
         >
           <ConversationList
+            error={listError} desktop={desktop} onDownload={downloadFolder} downloading={downloading}
             messages={visibleMessages}
             activeFolder={activeFolder}
             selUid={selUid}
@@ -316,13 +378,13 @@ export default function Zaim() {
           className={`flex-1 min-w-0 h-full ${mobilePane === 'list' ? 'hidden md:block' : 'block'}`}
           style={{ borderRight: '1px solid var(--line)' }}
         >
-          <ReadingCanvas
+          <ReadingCanvas desktop={desktop} offline={offline} error={readerError}
             onBack={() => { setMobilePane('list'); setSel(null); setSelUid(null) }}
             sel={sel} selUid={selUid} activeFolder={activeFolder} folders={folders} activeAccount={activeAccount}
             loadingDraft={loadingDraft} onEditDraft={editDraft} deleting={deleting} onDelete={deleteMail}
             onReply={() => sel && setCompose({ to: sel.from.replace(/.*<|>.*/g, ''), subject: 'Re: ' + sel.subject })}
             compose={compose} from={active?.email} account={activeAccount}
-            onComposeClose={() => setCompose(null)} onComposeSent={() => { setCompose(null); load() }}
+            onComposeClose={() => {setCompose(null);load();setMobilePane('list')}} onComposeSent={() => { setCompose(null);setMobilePane('list'); load() }}
           />
         </div>
 
