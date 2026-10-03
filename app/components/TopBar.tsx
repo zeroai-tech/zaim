@@ -2,13 +2,13 @@
 import { useState, useEffect, useRef } from 'react'
 import { Account, Avatar, Mark } from '@/lib/client-utils'
 import { Icon } from './Icon'
-export function TopBar({ accounts, activeAccount, activeEmail, activeLabel, email, avatar, onSwitchAccount, onAddAccount, onEditAccount, search, onSearch, onCompose, onShowKeys, onShowProfile, onLogout, panelState, onTogglePanel, onOpenDrawer, offline, dark, onTheme }: {
+export function TopBar({ accounts, activeAccount, activeEmail, activeLabel, email, avatar, onSwitchAccount, onAddAccount, onEditAccount, search, onSearch, onCompose, onShowKeys, onShowProfile, onLogout, panelState, onTogglePanel, onOpenDrawer, offline, dark, onTheme, desktop }: {
   accounts: Account[]; activeAccount: string; activeEmail: string; activeLabel: string; email: string; avatar: string
   onSwitchAccount: (id: string) => void; onAddAccount: () => void; onEditAccount: (id: string) => void
   search: string; onSearch: (v: string) => void; onCompose: () => void
   onShowKeys: () => void; onShowProfile: () => void; onLogout: () => void
   panelState: { spaces: boolean; context: boolean; ai: boolean }; onTogglePanel: (p: 'spaces' | 'context' | 'ai') => void; onOpenDrawer: () => void
-  offline: boolean; dark: boolean; onTheme: () => void
+  offline: boolean; dark: boolean; onTheme: () => void; desktop?: boolean
 }) {
   const [menu, setMenu] = useState<'account' | 'profile' | null>(null)
   const ref = useRef<HTMLElement>(null)
@@ -33,7 +33,7 @@ export function TopBar({ accounts, activeAccount, activeEmail, activeLabel, emai
       <button className="icon-button hidden lg:flex" aria-label="Toggle assistant" aria-pressed={panelState.ai} onClick={() => onTogglePanel('ai')}><Icon name="bot" /></button>
       <button className="icon-button" aria-label={dark ? 'Use light theme' : 'Use dark theme'} onClick={onTheme}><Icon name={dark ? 'sun' : 'moon'} /></button>
       <div className="relative"><button className="profile-trigger" aria-label="Profile menu" aria-expanded={menu === 'profile'} onClick={() => setMenu(menu === 'profile' ? null : 'profile')}><Avatar src={avatar} name={email} cls="w-8 h-8 rounded-full" /></button>
-        {menu === 'profile' && <div className="mail-menu profile-menu"><p>{email}</p><button onClick={() => { setMenu(null); onShowProfile() }}>Edit profile picture</button><button onClick={() => { setMenu(null); onEditAccount(activeAccount) }}>Mailbox settings</button><button onClick={() => { setMenu(null); onShowKeys() }}>Connect an agent</button><button className="text-red-600" onClick={onLogout}>Sign out</button></div>}
+        {menu === 'profile' && <div className="mail-menu profile-menu"><p>{email}</p><button onClick={() => { setMenu(null); onShowProfile() }}>Edit profile picture</button><button onClick={() => { setMenu(null); onEditAccount(activeAccount) }}>Mailbox settings</button><button onClick={() => { setMenu(null); onShowKeys() }}>Connect an agent</button>{desktop && <button onClick={() => { setMenu(null); window.dispatchEvent(new CustomEvent('zaim:menu', { detail: 'updates' })) }}>Check for updates</button>}<button className="text-red-600" onClick={onLogout}>Sign out</button></div>}
       </div>
     </div>
   </header>

@@ -13,6 +13,12 @@ let logs='';child.stdout.on('data',data=>logs+=data);child.stderr.on('data',data
     browser=await chromium.launch({...(process.env.CI ? {} : {executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'}),headless:true});
     const context=await browser.newContext({viewport:{width:1440,height:950}});const page=await context.newPage();const errors=[];
     page.on('pageerror',error=>errors.push(error.message));
+    await page.addInitScript(() => {
+      let state={status:'idle',currentVersion:'0.3.0'},listeners=[];
+      const emit=next=>{state={...state,...next};listeners.forEach(fn=>fn(state));return state};
+      window.__zaimInstalls=0;
+      window.zaimUpdates={state:async()=>state,subscribe:fn=>{listeners.push(fn);return()=>{listeners=listeners.filter(item=>item!==fn)}},check:async()=>emit({status:'available',version:'0.3.1'}),download:async()=>{emit({status:'downloading',progress:50});return emit({status:'ready',progress:100})},install:async()=>{window.__zaimInstalls++;return state}};
+    });
     await page.route('https://**/*',route=>route.abort()); // No remote services or real accounts in the test.
     fs.mkdirSync(path.join(root,'output'),{recursive:true});
     await page.route('**/api/auth/me',route=>route.fulfill({json:{user:null,desktop:false}}));
@@ -55,6 +61,10 @@ let logs='';child.stdout.on('data',data=>logs+=data);child.stderr.on('data',data
     const attachment=await context.request.get(origin+'/api/mail/attachment?uid=101&mailbox=INBOX&index=0&account=mailbox&offline=1');assert.equal(attachment.status(),200);assert.equal(attachment.headers()['x-zaim-cached'],'true');assert((await attachment.text()).includes('Isolated fixture attachment'));
     await page.getByRole('button',{name:'Compose',exact:true}).click();await page.getByRole('textbox',{name:'To',exact:true}).fill('review@example.test');await page.getByRole('textbox',{name:'Subject',exact:true}).fill('Offline project draft');await page.getByRole('textbox',{name:'Message body'}).fill('Written while offline. Must not auto-send.');
     await page.getByRole('button',{name:'Attach files'}).click({trial:true});await page.locator('input[type=file]').setInputFiles({name:'local-note.txt',mimeType:'text/plain',buffer:Buffer.from('Offline attachment payload')});
+    await page.evaluate(()=>window.dispatchEvent(new CustomEvent('zaim:menu',{detail:'updates'})));await page.getByRole('button',{name:'Update',exact:true}).click();await page.getByRole('button',{name:'Restart and update',exact:true}).waitFor();
+    await page.evaluate(()=>{window.__rejectDraftFlush=e=>e.detail.pending.push(Promise.resolve(false));window.addEventListener('zaim:flush-drafts',window.__rejectDraftFlush)});
+    await page.getByRole('button',{name:'Restart and update',exact:true}).click();await page.getByRole('alert').getByText('Your draft could not be saved. Save it before restarting.',{exact:true}).waitFor();assert.equal(await page.evaluate(()=>window.__zaimInstalls),0,'Restart must be blocked when draft save fails');
+    await page.evaluate(()=>window.removeEventListener('zaim:flush-drafts',window.__rejectDraftFlush));await page.getByRole('button',{name:'Restart and update',exact:true}).click();await page.waitForFunction(()=>window.__zaimInstalls===1);assert.equal(JSON.parse(fs.readFileSync(control)).sent,0,'Update restart must never send email');await page.screenshot({path:path.join(root,'output/update-ready.png')});await page.getByRole('button',{name:'Close updates',exact:true}).click();
     await page.getByRole('button',{name:'Save draft',exact:true}).click();await page.getByText('Offline · Saved on this device',{exact:true}).waitFor();assert(await page.getByRole('button',{name:'Send message',exact:true}).isDisabled());
     assert.equal(JSON.parse(fs.readFileSync(control)).sent,0);
     await page.reload();await page.getByRole('button',{name:'Local drafts'}).click();await page.getByRole('button',{name:/To: review@example.test/}).click();await page.getByRole('button',{name:'Edit draft',exact:true}).click();await page.getByText('local-note.txt ·',{exact:false}).waitFor();assert.equal(await page.getByRole('textbox',{name:'Subject',exact:true}).inputValue(),'Offline project draft');assert((await page.getByRole('textbox',{name:'Message body'}).innerText()).includes('Must not auto-send'));
@@ -71,7 +81,7 @@ let logs='';child.stdout.on('data',data=>logs+=data);child.stderr.on('data',data
     await page.getByRole('button',{name:'Use dark theme'}).click();await page.screenshot({path:path.join(root,'output/inbox-dark.png')});
     setControl({authFailure:true});const denied=await context.request.get(origin+'/api/mail/list?account=mailbox');assert.equal(denied.status(),502);assert.equal((await denied.json()).ok,false,'Authentication failure returned cached mail');setControl({authFailure:false});
     assert.deepEqual(errors,[]);
-    console.log('PASS: company email/password login, readable multi-account switcher on desktop/mobile, managed settings protection, duplicate prevention, external advanced settings, removal, failed-password UI, actual standalone desktop server, encrypted mailbox login, download without marking read, cached inbox/body/attachments after outage and reload, offline draft/body/attachment persistence, no auto-send on reconnect, explicit mocked send, draft cleanup, mobile navigation, themes, and no rendering errors.');
+    console.log('PASS: update notification/download/restart UI, draft flush and failed-save restart guard, company email/password login, readable multi-account switcher on desktop/mobile, managed settings protection, duplicate prevention, external advanced settings, removal, failed-password UI, actual standalone desktop server, encrypted mailbox login, download without marking read, cached inbox/body/attachments after outage and reload, offline draft/body/attachment persistence, no auto-send on reconnect, explicit mocked send, draft cleanup, mobile navigation, themes, and no rendering errors.');
   }catch(error){console.error(error);console.error(logs.slice(-2500));process.exitCode=1}
   finally{if(browser)await browser.close();if(child.exitCode===null){child.kill();await new Promise(r=>child.once('exit',r));}fs.rmSync(tmp,{recursive:true,force:true})}
 })();

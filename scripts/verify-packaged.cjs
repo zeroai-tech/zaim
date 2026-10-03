@@ -25,7 +25,7 @@ async function seedMailbox() {
 }
 let app
 async function launch() {
-  const env = { ...process.env, ZAIM_USER_DATA_DIR: path.join(temp, 'profile'), ZAIM_PORT: '4191', ZAIM_DISABLE_AI: '1' }
+  const env = { ...process.env, ZAIM_USER_DATA_DIR: path.join(temp, 'profile'), ZAIM_PORT: '4191', ZAIM_DISABLE_AI: '1', ZAIM_DISABLE_UPDATE_CHECKS: '1' }
   delete env.ELECTRON_RUN_AS_NODE
   delete env.NODE_OPTIONS
   app = await _electron.launch({ executablePath: path.resolve(executablePath), env })
@@ -38,6 +38,9 @@ async function launch() {
     const cookie = await seedMailbox()
     let page = await launch()
     await page.getByRole('heading', { name: 'Sign in to your mailbox' }).waitFor()
+    const updateState = await page.evaluate(() => window.zaimUpdates.state())
+    assert.equal(updateState.currentVersion, await app.evaluate(({app}) => app.getVersion()))
+    assert.equal(updateState.status, 'idle')
     const split = cookie.indexOf('=')
     await app.context().addCookies([{name:cookie.slice(0,split),value:cookie.slice(split+1),url:origin,httpOnly:true,sameSite:'Lax',expires:Date.now()/1000+86400}])
     await page.reload()

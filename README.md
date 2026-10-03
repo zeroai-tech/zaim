@@ -127,3 +127,15 @@ API routes run on the Node.js runtime (imapflow/nodemailer), one connection per 
 ---
 
 © ZeroAI Technologies — engine: imapflow · nodemailer · mailparser · Next.js.
+
+## Desktop updates
+
+The desktop app checks for stable updates after startup and every six hours. Users can also choose **Help → Check for Updates** or use the profile menu. **Update** downloads and verifies the package; **Restart and update** first saves any open draft, then applies the update. Closing the app alone never installs an update.
+
+Windows NSIS and Linux AppImage updates use `electron-updater`. Mac updates verify the release checksum and app identity, replace the bundle in place, and restore the previous bundle if the new mail server does not start. Existing mail, credentials, cache and drafts remain in the application-data directory. The app's installation folder must be writable. Differential downloads reuse cached packages and published block maps where possible; the first update or an unavailable delta can require a complete package transfer.
+
+Each published main-branch build receives `major.minor.GITHUB_RUN_NUMBER` from `scripts/version-build.cjs`, so builds are detectable without manually changing the patch number. CI publishes Windows/Linux update YAML, block maps and per-architecture Mac manifests with the installers, then makes the complete release public under its `v<version>` tag. Keep the package major/minor version current when starting a new release series.
+
+Versions before this updater was added require one installation of an updater-enabled release. Future releases are applied inside Zaim.
+
+Verification: `npm run test:updates`, `node scripts/verify-desktop.cjs` and `node scripts/verify-packaged.cjs`. The latter two use Playwright and isolated test profiles; fixture messages are never sent to real recipients.

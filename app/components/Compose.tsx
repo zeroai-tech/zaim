@@ -45,6 +45,11 @@ export function Compose({ initial, from, account, onClose, onSent, desktop, offl
   }, [desktop, account, payload])
   latestSave.current = save
   useEffect(() => {
+    const flush = (event: Event) => { (event as CustomEvent<{ pending: Promise<boolean>[] }>).detail.pending.push(latestSave.current()) }
+    window.addEventListener('zaim:flush-drafts', flush)
+    return () => window.removeEventListener('zaim:flush-drafts', flush)
+  }, [])
+  useEffect(() => {
     if (!desktop || sending || (!to && !subject && !body && !atts.length)) return
     const timer = setTimeout(() => { void save() }, 800)
     return () => clearTimeout(timer)

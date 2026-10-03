@@ -327,7 +327,7 @@ export default function Zaim() {
 
   return (
     <div className="h-screen w-full flex flex-col">
-      <TopBar
+      <TopBar desktop={desktop}
         accounts={accounts} activeAccount={activeAccount} activeEmail={active?.email || email} activeLabel={active?.label || 'Mailbox'}
         email={email} avatar={avatar}
         onSwitchAccount={(id) => { readSeq.current++;setSel(null);setSelUid(null);setMessages([]);setCompose(null);setReaderError('');setListError('');setMobilePane('list');setActiveAccount(id); setActiveFolder('INBOX'); setSmartView(null) }}

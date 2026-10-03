@@ -33,7 +33,9 @@ jobs:
             target: --mac --arm64
             executable: release/mac-arm64/Zaim.app/Contents/MacOS/Zaim
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 40
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     env:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       DEBUG: pw:browser
@@ -44,6 +46,10 @@ jobs:
           node-version: '22'
           cache: npm
       - run: npm ci
+      - name: Assign release version
+        id: version
+        run: node scripts/version-build.cjs
+      - run: npm run test:updates
       - run: npm run lint
       - run: npm run test:offline
       - run: npm run build
@@ -56,6 +62,8 @@ jobs:
         run: node scripts/verify-desktop.cjs
       - name: Build installers
         run: npx electron-builder ${{ matrix.target }} --publish never
+      - name: Generate update manifests
+        run: node scripts/update-manifest.cjs
       - name: Verify packaged app (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a node scripts/verify-packaged.cjs
@@ -74,6 +82,10 @@ jobs:
             release/*.exe
             release/*.AppImage
             release/*.zip
+            release/*.blockmap
+            release/latest.yml
+            release/latest-linux.yml
+            release/update-mac-*.json
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4
@@ -95,13 +107,20 @@ jobs:
           path: installers
           merge-multiple: true
       - uses: softprops/action-gh-release@v2
+        id: release
         with:
-          tag_name: build-${{ github.run_number }}-${{ github.sha }}
+          tag_name: v${{ needs.build.outputs.version }}
           target_commitish: ${{ github.sha }}
-          name: Zaim desktop build ${{ github.run_number }}
-          make_latest: true
+          name: Zaim ${{ needs.build.outputs.version }}
+          draft: true
+          make_latest: false
           files: installers/*
           fail_on_unmatched_files: true
           body: |
+            Background update checks and in-app download/restart are included. Update payloads are checksum verified; changed blocks are reused when available.
             Built from the linked source commit. Offline storage, production mailbox workflow with fake IMAP/SMTP, and packaged-app restart tests passed on Windows, Linux and both Mac architectures.
             Installers are unsigned. First-time sign-in and sending require a network connection. Downloaded mail and local drafts work offline; drafts never send automatically.
+      - name: Publish complete release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh api --method PATCH repos/${{ github.repository }}/releases/${{ steps.release.outputs.id }} -F draft=false -f make_latest=true

@@ -1,7 +1,7 @@
 // Zaim desktop shell. Boots the Next.js standalone server locally (so the full
 // secure mail app — IMAP/SMTP, encrypted vault — runs on the device), then opens
 // it in a native window. Secrets + the SQLite vault live in the OS app-data dir.
-const { app, BrowserWindow, Menu, screen, shell, dialog } = require('electron')
+const { app, BrowserWindow, Menu, screen, shell, dialog, ipcMain, net } = require('electron')
 const { spawn, execFileSync } = require('node:child_process')
 const path = require('node:path')
 const fs = require('node:fs')
@@ -82,7 +82,7 @@ function machineEnv() {
   if (changed) fs.writeFileSync(file, JSON.stringify(s), { mode: 0o600 })
   return {
     ...s,
-    ZAIM_DESKTOP: '1',
+    ZAIM_DESKTOP: '1', ZAIM_APP_VERSION: app.getVersion(),
     // Desktop must not inherit cloud database configuration from a development shell.
     POSTGRES_URL: '', DATABASE_URL: '', CLOUDFLARE_ACCOUNT_ID: '', D1_DATABASE_ID: '', CLOUDFLARE_API_TOKEN: '', VERCEL: '',
     ZAIM_DB_PATH: path.join(dir, 'zaim.db'),
@@ -324,6 +324,7 @@ function buildMenu() {
       label: 'Zaim',
       submenu: [
         { role: 'about' },
+        item('Check for Updates…', undefined, 'updates'),
         { type: 'separator' },
         item('Settings…', 'CmdOrCtrl+,', 'profile'),
         { type: 'separator' },
@@ -378,6 +379,10 @@ function buildMenu() {
       ],
     },
     {
+      label: 'Help',
+      submenu: [item('Check for Updates…', undefined, 'updates')],
+    },
+    {
       label: 'Window',
       submenu: mac
         ? [{ role: 'minimize' }, { role: 'zoom' }, { type: 'separator' }, { role: 'front' }]
@@ -397,7 +402,7 @@ function createWindow() {
     backgroundColor: '#f5f7fa', title: 'Zaim',
     // Do not paint an empty window while the local server is still starting.
     show: false,
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, 'preload.cjs') },
   })
   if (state.maximised) win.maximize()
   win.once('ready-to-show', () => win.show())
@@ -442,6 +447,7 @@ if (!app.requestSingleInstanceLock()) {
       dialog.showErrorBox('Zaim could not start', 'The installed app is missing its mail server. Reinstall the complete desktop package.'); app.quit(); return
     }
     stageAssets()
+    require('./updates.cjs').setupUpdates({ app, ipcMain, BrowserWindow, net, port: PORT, stopChildren })
     buildMenu()
     await reapOrphans()
     if (await portBusy(PORT)) { dialog.showErrorBox('Zaim could not start', 'Another process is using the local mail port. Close the other Zaim instance or restart your computer.'); app.quit(); return }
@@ -455,6 +461,7 @@ function stopChildren() {
   for (const c of [child, nndbChild, nndbInitChild]) { try { c && c.kill() } catch { /* already gone */ } }
 }
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') { stopChildren(); app.quit() } })
+app.on('before-quit', stopChildren)
 app.on('quit', stopChildren)
 // A terminal Ctrl+C or a `kill` reaches the shell but not its children, and the
 // pair left behind is what holds the ports next time.
