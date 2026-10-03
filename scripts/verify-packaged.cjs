@@ -25,7 +25,10 @@ async function seedMailbox() {
 }
 let app
 async function launch() {
-  app = await _electron.launch({ executablePath, env: { ...process.env, ELECTRON_RUN_AS_NODE: '', ZAIM_USER_DATA_DIR: path.join(temp, 'profile'), ZAIM_PORT: '4191', ZAIM_DISABLE_AI: '1', ZAIM_TEST_CONTROL: control, NODE_OPTIONS: `--require ${path.join(__dirname, 'mail-fixture.cjs')}` } })
+  const env = { ...process.env, ZAIM_USER_DATA_DIR: path.join(temp, 'profile'), ZAIM_PORT: '4191', ZAIM_DISABLE_AI: '1' }
+  delete env.ELECTRON_RUN_AS_NODE
+  delete env.NODE_OPTIONS
+  app = await _electron.launch({ executablePath: path.resolve(executablePath), env })
   const page = await app.firstWindow()
   await page.waitForLoadState('domcontentloaded')
   return page
