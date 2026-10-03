@@ -20,7 +20,7 @@ const store=require('../lib/offline-store.ts');
   const draft=store.saveLocalDraft(scope,{to:'review@example.test',subject:'Local only',html:'Draft body',attachments:[{filename:'note.txt',content:Buffer.from('attachment data').toString('base64')}]});
   store.saveLocalDraft(scope,{...draft,subject:'Updated draft'});
   assert.equal(store.localDrafts(scope).length,1);assert.equal(store.localDrafts(scope)[0].subject,'Updated draft');
-  const files=fs.readdirSync(path.join(dir,'offline-mail'));for(const file of files){const data=fs.readFileSync(path.join(dir,'offline-mail',file),'utf8');assert(data.startsWith('enc:'));assert(!data.includes('Private fixture'));assert(!data.includes('Draft body'));assert.equal(fs.statSync(path.join(dir,'offline-mail',file)).mode&0o777,0o600);}
+  const files=fs.readdirSync(path.join(dir,'offline-mail'));for(const file of files){const data=fs.readFileSync(path.join(dir,'offline-mail',file),'utf8');assert(data.startsWith('enc:'));assert(!data.includes('Private fixture'));assert(!data.includes('Draft body'));if(process.platform!=='win32')assert.equal(fs.statSync(path.join(dir,'offline-mail',file)).mode&0o777,0o600);}
   const previous=store.mailCacheKey(scope,'INBOX','message:101');store.folderGeneration(scope,'INBOX','10');store.writeLocal(scope,previous(),value);store.folderGeneration(scope,'INBOX','11');assert.equal(store.readLocal(scope,previous()),null);
   store.deleteLocalDraft(scope,draft.id);assert.equal(store.localDrafts(scope).length,0);
   process.env.ZAIM_DESKTOP='0';assert.equal(store.readLocal(scope,'message'),null);

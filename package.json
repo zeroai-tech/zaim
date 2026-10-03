@@ -1,6 +1,6 @@
 {
   "name": "zaim",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Zaim \u2014 a secure, stylish mail client with an agent API. Human webapp + CLI + AI-agent control (Claude Code, Gemini, Codex). By ZeroAI.",
   "type": "module",
@@ -45,6 +45,7 @@
     "autoprefixer": "^10.4.20",
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
+    "playwright": "^1.61.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2"
@@ -90,7 +91,8 @@
           ]
         }
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "Zaim-${version}-mac-${arch}.${ext}"
     },
     "dmg": {
       "title": "Zaim"
@@ -98,13 +100,14 @@
     "win": {
       "target": [
         {
-          "target": "zip",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
         }
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "Zaim-${version}-windows-${arch}-setup.${ext}"
     },
     "linux": {
       "category": "Office",
@@ -116,11 +119,17 @@
           ]
         }
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "Zaim-${version}-linux-${arch}.${ext}"
     },
     "publish": null,
     "asarUnpack": [
       "**/node_modules/better-sqlite3/**"
-    ]
+    ],
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

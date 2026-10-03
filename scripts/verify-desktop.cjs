@@ -1,7 +1,7 @@
 const { chromium }=require(process.argv[2]||'playwright');
 const { spawn }=require('node:child_process');const fs=require('node:fs');const path=require('node:path');const os=require('node:os');const crypto=require('node:crypto');const assert=require('node:assert/strict');
 const root=path.resolve(__dirname,'..');const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'zaim-desktop-e2e-'));const control=path.join(tmp,'control.json');
-const origin='http://127.0.0.1:4189';const electron=path.join(root,'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron');
+const origin='http://127.0.0.1:4189';const electron=require('electron');
 fs.writeFileSync(control,JSON.stringify({online:true,sent:0,seen:[]}));
 const setControl=patch=>fs.writeFileSync(control,JSON.stringify({...JSON.parse(fs.readFileSync(control,'utf8')),...patch}));
 const child=spawn(electron,[path.join(root,'.next/standalone/server.js')],{cwd:path.join(root,'.next/standalone'),env:{...process.env,ELECTRON_RUN_AS_NODE:'1',NODE_OPTIONS:`--require ${path.join(__dirname,'mail-fixture.cjs')}`,PORT:'4189',HOSTNAME:'127.0.0.1',NODE_ENV:'production',ZAIM_DESKTOP:'1',ZAIM_LOCAL_HTTP:'1',ZAIM_DB_PATH:path.join(tmp,'vault.db'),ZAIM_TEST_CONTROL:control,ZAIM_ENC_KEY:crypto.randomBytes(32).toString('hex'),ZAIM_SESSION_SECRET:crypto.randomBytes(32).toString('hex'),ZAIM_API_KEY:crypto.randomBytes(32).toString('hex'),POSTGRES_URL:'',DATABASE_URL:'',CLOUDFLARE_ACCOUNT_ID:'',D1_DATABASE_ID:'',CLOUDFLARE_API_TOKEN:'',VERCEL:'',NNDB_URL:'http://127.0.0.1:9'}});
@@ -10,7 +10,7 @@ let logs='';child.stdout.on('data',data=>logs+=data);child.stderr.on('data',data
   let browser;
   try{
     for(let i=0;i<100;i++){if(child.exitCode!==null)throw new Error('Server exited: '+logs);try{if((await fetch(origin+'/api/desktop/health')).ok)break}catch{}await new Promise(r=>setTimeout(r,200));}
-    browser=await chromium.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',headless:true});
+    browser=await chromium.launch({...(process.env.CI ? {} : {executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'}),headless:true});
     const context=await browser.newContext({viewport:{width:1440,height:950}});const page=await context.newPage();const errors=[];
     page.on('pageerror',error=>errors.push(error.message));
     await page.route('https://**/*',route=>route.abort()); // No remote services or real accounts in the test.

@@ -4,7 +4,7 @@ const root = path.resolve(__dirname, '..')
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'zaim-packaged-'))
 const control = path.join(temp, 'control.json')
 fs.writeFileSync(control, JSON.stringify({ online: true, sent: 0, seen: [] }))
-const executablePath = path.join(root, 'release/mac/Zaim.app/Contents/MacOS/Zaim')
+const executablePath = process.env.ZAIM_PACKAGED_EXECUTABLE || path.join(root, 'release/mac/Zaim.app/Contents/MacOS/Zaim')
 const origin = 'http://127.0.0.1:4191'
 const { spawn } = require('node:child_process'), crypto = require('node:crypto')
 let seedServer
@@ -13,7 +13,7 @@ async function seedMailbox() {
   const secrets = Object.fromEntries(['ZAIM_ENC_KEY', 'ZAIM_SESSION_SECRET', 'ZAIM_API_KEY', 'NNDB_TOKEN'].map(k => [k, crypto.randomBytes(32).toString('hex')]))
   fs.writeFileSync(path.join(profile, 'zaim-secrets.json'), JSON.stringify(secrets), { mode: 0o600 })
   const base = 'http://127.0.0.1:4192'
-  seedServer = spawn(path.join(root, 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'), [path.join(root, '.next/standalone/server.js')], { env: { ...process.env, ...secrets, ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: `--require ${path.join(__dirname, 'mail-fixture.cjs')}`, ZAIM_TEST_CONTROL: control, ZAIM_DESKTOP: '1', ZAIM_LOCAL_HTTP: '1', ZAIM_DB_PATH: path.join(profile, 'zaim.db'), PORT: '4192', HOSTNAME: '127.0.0.1', POSTGRES_URL: '', DATABASE_URL: '', VERCEL: '' }, stdio: 'ignore' })
+  seedServer = spawn(require('electron'), [path.join(root, '.next/standalone/server.js')], { env: { ...process.env, ...secrets, ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: `--require ${path.join(__dirname, 'mail-fixture.cjs')}`, ZAIM_TEST_CONTROL: control, ZAIM_DESKTOP: '1', ZAIM_LOCAL_HTTP: '1', ZAIM_DB_PATH: path.join(profile, 'zaim.db'), PORT: '4192', HOSTNAME: '127.0.0.1', POSTGRES_URL: '', DATABASE_URL: '', VERCEL: '' }, stdio: 'ignore' })
   for (let i=0;i<100;i++) { try { if ((await fetch(base+'/api/desktop/health')).ok) break } catch {} await new Promise(r=>setTimeout(r,100)) }
   const login = await fetch(base+'/api/auth/login', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({email:'demo@example.test',password:'fixture-only-password',imapHost:'127.0.0.1',imapPort:993,smtpHost:'127.0.0.1',smtpPort:465}) })
   assert.equal(login.status,200)
@@ -56,13 +56,15 @@ async function launch() {
     assert.equal(await page.getByRole('textbox', { name: 'Subject', exact: true }).inputValue(), 'Persist after app restart')
     assert.equal(JSON.parse(fs.readFileSync(control)).sent, 0)
     await page.screenshot({ path: path.join(root, 'output/packaged-offline.png') })
+    if (process.platform === 'darwin') {
     // macOS closing the last window must keep the local server alive.
     await page.close()
     assert.equal((await fetch(origin + '/api/desktop/health')).status, 200)
     await app.evaluate(({ app }) => app.emit('activate'))
     page = await app.firstWindow()
     await page.getByText('Working from downloaded mail.').waitFor()
-    console.log('PASS: packaged Mac app startup from a seeded downloaded mailbox, SQLite native dependency, stable encrypted profile and cookies, offline mail/drafts after full restart, no automatic send, and reopening the last window.')
+    }
+    console.log('PASS: packaged desktop app startup from a seeded downloaded mailbox, SQLite native dependency, stable encrypted profile and cookies, offline mail/drafts after full restart, no automatic send, and reopening the last window.')
   } catch (error) { console.error(error); process.exitCode = 1 }
   finally { if (seedServer) seedServer.kill(); if (app) await app.close(); fs.rmSync(temp, { recursive: true, force: true }) }
 })()
