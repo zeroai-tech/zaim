@@ -56,7 +56,9 @@ export function Avatar({ src, name, email, cls, txt = 'text-xs' }: { src?: strin
   return <span className={`${cls} grid place-items-center ${txt} font-semibold text-white shrink-0`} style={{background:avatarColor(name||email||'?')}}>{initials(name||email||'?')}</span>
 }
 
-export function Mark({ big }: { big?: boolean }) { return <span className={`${big ? 'w-9 h-9 text-lg rounded-xl' : 'w-7 h-7 text-sm rounded-lg'} accent-grad grid place-items-center text-white font-black`}>Z</span> }
+export function Mark({ big }: { big?: boolean }) {
+  return <img src="/icon.svg" alt="Zaim" width={big ? 40 : 32} height={big ? 40 : 32} className="shrink-0" />
+}
 
 export const field = 'w-full bg-[color:var(--panel-2)] border rounded-xl px-4 py-3 text-sm outline-none focus:border-[color:var(--accent)]'
 

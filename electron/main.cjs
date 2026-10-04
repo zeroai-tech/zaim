@@ -399,7 +399,7 @@ function createWindow() {
     width: state.width, height: state.height,
     ...(Number.isFinite(state.x) ? { x: state.x, y: state.y } : {}),
     minWidth: 900, minHeight: 600,
-    backgroundColor: '#f5f7fa', title: 'Zaim',
+    backgroundColor: '#f5f7fa', title: 'Zaim', icon: path.join(ROOT, 'public', 'icon.png'),
     // Do not paint an empty window while the local server is still starting.
     show: false,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, preload: path.join(__dirname, 'preload.cjs') },
