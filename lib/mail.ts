@@ -53,7 +53,7 @@ export interface OAuthAuth { user: string; accessToken: string }
 interface ImapTimeouts { connectionTimeout: number; greetingTimeout: number; socketTimeout: number }
 const DEFAULT_TIMEOUTS: ImapTimeouts = process.env.ZAIM_DESKTOP === '1' ? { connectionTimeout: 5_000, greetingTimeout: 5_000, socketTimeout: 10_000 } : { connectionTimeout: 20_000, greetingTimeout: 15_000, socketTimeout: 30_000 }
 
-async function withImap<T>(account: MailAccount, fn: (c: ImapFlow) => Promise<T>, timeouts: ImapTimeouts = DEFAULT_TIMEOUTS): Promise<T> {
+export async function withImap<T>(account: MailAccount, fn: (c: ImapFlow) => Promise<T>, timeouts: ImapTimeouts = DEFAULT_TIMEOUTS): Promise<T> {
   const { imap } = account
   // `pass` beginning with the OAuth marker means the caller holds a token, not a
   // password; imapflow then negotiates XOAUTH2/OAUTHBEARER instead of PLAIN.

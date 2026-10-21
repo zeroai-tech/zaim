@@ -23,11 +23,42 @@ export async function api(path: string, init?: RequestInit) {
   const timer = setTimeout(() => controller.abort(), path.includes('/mail/send') || path.includes('/auth/login') ? 65000 : 20000)
   try {
     const response = await fetch(path, { ...init, signal: init?.signal || controller.signal, credentials: 'include', cache: 'no-store', headers: { 'content-type': 'application/json', ...(init?.headers || {}) } })
-    const result = await response.json()
+    // The platform answers some failures with plain text, not our JSON (413 for
+    // a request over 4.5 MB, gateway timeouts). Say what happened instead of
+    // reporting a dropped connection.
+    const result = await response.json().catch(() => ({ error: response.status === 413 ? 'This message is too large to send in one request.' : `The server answered ${response.status}.` }))
     return response.ok ? result : { ...result, ok: false, status: response.status }
   } catch { return { ok:false, error:'Connection unavailable. Please try again.', networkError:true } }
   finally { clearTimeout(timer) }
 }
+// The website's server refuses requests over 4.5 MB, and attachments travel as
+// base64 JSON. Above this size, attachments are uploaded first in pieces
+// (/api/mail/upload) and the message only refers to them. The desktop app runs
+// its own server with no such limit, so it never needs this.
+const DIRECT_LIMIT = 3_500_000
+const PIECE = 3_000_000 // base64 characters, a multiple of 4
+type OutAtt = { filename: string; content: string; contentType: string }
+export async function stageLargeAttachments(account: string, message: { attachments: OutAtt[] }, onProgress?: (text: string) => void):
+  Promise<{ ok: true; attachments: (OutAtt | { upload: string; filename: string; contentType: string })[] } | { ok: false; error: string }> {
+  if (JSON.stringify(message).length <= DIRECT_LIMIT) return { ok: true, attachments: message.attachments }
+  const out: (OutAtt | { upload: string; filename: string; contentType: string })[] = []
+  const pieces = message.attachments.reduce((n, a) => n + Math.ceil(a.content.length / PIECE), 0)
+  let done = 0
+  for (const a of message.attachments) {
+    const id = crypto.randomUUID()
+    const total = Math.max(1, Math.ceil(a.content.length / PIECE))
+    for (let index = 0; index < total; index++) {
+      onProgress?.(`Uploading attachments ${Math.round((done / pieces) * 100)}%`)
+      const r = await api('/api/mail/upload' + q({ account }), { method: 'POST', body: JSON.stringify({ id, index, total, filename: a.filename, contentType: a.contentType, data: a.content.slice(index * PIECE, (index + 1) * PIECE) }) })
+      if (!r.ok) return { ok: false, error: `Could not upload "${a.filename}": ${r.error || 'unknown error'}` }
+      done++
+    }
+    out.push({ upload: id, filename: a.filename, contentType: a.contentType })
+  }
+  onProgress?.('')
+  return { ok: true, attachments: out }
+}
+
 export const q = (params: Record<string, string | undefined>) =>
   '?' + Object.entries(params).filter(([, v]) => v).map(([k, v]) => `${k}=${encodeURIComponent(v!)}`).join('&')
 

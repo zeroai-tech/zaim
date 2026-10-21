@@ -2,6 +2,7 @@ import { cacheScope, deleteLocalDraft } from '@/lib/offline-store'
 import { json } from '@/lib/auth'
 import { resolveForRequest } from '@/lib/resolve'
 import { sendMail, appendToSent, deleteMessage } from '@/lib/mail'
+import { discardUploads, resolveAttachments } from '@/lib/uploads'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,9 +21,10 @@ export async function POST(req: Request) {
   const { to, subject } = body
   if (!to || !subject) return json({ error: '`to` and `subject` are required' }, 400)
   try {
+    // Large attachments arrive as { upload: id }, uploaded beforehand in pieces.
+    const { attachments, uploads } = await resolveAttachments(r.ctx.account, body.attachments)
     const { messageId, raw } = await sendMail(r.ctx.account, {
-      to, subject, html: body.html, text: body.text, cc: body.cc, bcc: body.bcc, replyTo: body.replyTo,
-      attachments: Array.isArray(body.attachments) ? body.attachments : undefined,
+      to, subject, html: body.html, text: body.text, cc: body.cc, bcc: body.bcc, replyTo: body.replyTo, attachments,
     })
     // Sent-copy and draft-cleanup are two independent IMAP connections — run
     // them side by side instead of one after another so the request's total
@@ -32,6 +34,7 @@ export async function POST(req: Request) {
     const [sentResult, draftResult] = await Promise.allSettled([
       body.saveToSent !== false ? appendToSent(r.ctx.account, raw) : Promise.resolve(),
       body.draft?.uid && body.draft?.mailbox ? deleteMessage(r.ctx.account, String(body.draft.mailbox), Number(body.draft.uid)) : Promise.resolve(),
+      discardUploads(r.ctx.account, uploads),
     ])
     let sentWarning: string | undefined
     if (sentResult.status === 'rejected') {

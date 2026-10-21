@@ -1,6 +1,7 @@
 import { json } from '@/lib/auth'
 import { resolveForRequest } from '@/lib/resolve'
 import { saveDraft } from '@/lib/mail'
+import { discardUploads, resolveAttachments } from '@/lib/uploads'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,10 +21,11 @@ export async function POST(req: Request) {
   const { to, subject } = body
   if (!to || !subject) return json({ error: '`to` and `subject` are required' }, 400)
   try {
+    const { attachments, uploads } = await resolveAttachments(r.ctx.account, body.attachments)
     await saveDraft(r.ctx.account, {
-      to, subject, html: body.html, text: body.text, cc: body.cc, bcc: body.bcc, replyTo: body.replyTo,
-      attachments: Array.isArray(body.attachments) ? body.attachments : undefined,
+      to, subject, html: body.html, text: body.text, cc: body.cc, bcc: body.bcc, replyTo: body.replyTo, attachments,
     })
+    await discardUploads(r.ctx.account, uploads).catch((e) => console.error('[mail/draft] discardUploads failed:', (e as Error).message))
     return json({ ok: true })
   } catch (e) {
     return json({ ok: false, error: (e as Error).message }, 502)

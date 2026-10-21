@@ -1,6 +1,6 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Att, ComposeInit, api, fmtSize, q, readB64 } from '@/lib/client-utils'
+import { Att, ComposeInit, api, fmtSize, q, readB64, stageLargeAttachments } from '@/lib/client-utils'
 import { Icon } from './Icon'
 
 function cleanEditorHtml(html: string) {
@@ -68,7 +68,10 @@ export function Compose({ initial, from, account, onClose, onSent, desktop, offl
     if (offline) { setError('Reconnect before sending. Your draft stays on this device.'); return }
     setError(''); setSending(true)
     if (desktop && !(await save())) { setSending(false); return }
-    const r = await api('/api/mail/send'+q({account}), { method:'POST', body:JSON.stringify({ ...payload(), saveToSent:true, draft:initial.draft, localDraftId:draftId.current }) })
+    const message = payload()
+    const staged = desktop ? { ok: true as const, attachments: message.attachments } : await stageLargeAttachments(account, message, setSaveStatus)
+    if (!staged.ok) { setSending(false); setSaveStatus(''); setError(staged.error + ' Nothing was sent. Your draft is retained.'); return }
+    const r = await api('/api/mail/send'+q({account}), { method:'POST', body:JSON.stringify({ ...message, attachments: staged.attachments, saveToSent:true, draft:initial.draft, localDraftId:draftId.current }) })
     setSending(false)
     if (r.ok) { sent.current = true; if (r.draftWarning || r.sentWarning) alert([r.draftWarning,r.sentWarning].filter(Boolean).join(' ')); onSent() }
     else setError((r.error || 'Sending could not be confirmed.') + ' Your draft is retained. Check Sent before retrying if the connection failed during delivery.')
@@ -82,6 +85,6 @@ export function Compose({ initial, from, account, onClose, onSent, desktop, offl
       <input ref={fileIn} type="file" multiple className="hidden" onChange={e=>{void addFiles(e.target.files);e.target.value=''}} />
       {atts.length>0 && <div className="flex flex-wrap gap-2 mt-5">{atts.map((a,i)=><div className="mail-attachment" key={i}><Icon name="attach" size={14} /><span>{a.name} · {fmtSize(a.size)}</span><button aria-label={`Remove ${a.name}`} onClick={()=>setAtts(list=>list.filter((_,j)=>j!==i))}><Icon name="close" size={13} /></button></div>)}</div>}
       {error && <p role="alert" className="text-xs text-red-600 mt-5 leading-relaxed">{error}</p>}
-    </div><div className="compose-footer"><button className="primary-button" disabled={sending || !to || offline} onClick={send}><Icon name="sent" size={16} />{sending?'Sending…':'Send message'}</button><button className="secondary-button" disabled={sending} onClick={async()=>{if(desktop){await save()}else{setError('');const r=await api('/api/mail/draft'+q({account}),{method:'POST',body:JSON.stringify(payload())});setSaveStatus(r.ok?'Saved to mailbox Drafts':'');if(!r.ok)setError(r.error)}}}>Save draft</button><span role="status" className="text-[10px] text-[color:var(--muted)] ml-auto">{offline?'Offline · ':''}{saveStatus}</span></div>
+    </div><div className="compose-footer"><button className="primary-button" disabled={sending || !to || offline} onClick={send}><Icon name="sent" size={16} />{sending?'Sending…':'Send message'}</button><button className="secondary-button" disabled={sending} onClick={async()=>{if(desktop){await save()}else{setError('');const message=payload();const staged=await stageLargeAttachments(account,message,setSaveStatus);if(!staged.ok){setError(staged.error);return}const r=await api('/api/mail/draft'+q({account}),{method:'POST',body:JSON.stringify({...message,attachments:staged.attachments})});setSaveStatus(r.ok?'Saved to mailbox Drafts':'');if(!r.ok)setError(r.error)}}}>Save draft</button><span role="status" className="text-[10px] text-[color:var(--muted)] ml-auto">{offline?'Offline · ':''}{saveStatus}</span></div>
   </div>
 }
