@@ -75,26 +75,139 @@ zaim send --to principal@school.org --subject "Follow-up" --body "…" --json
 
 Every command maps to an HTTP endpoint (`GET /api/mail/list`, `GET /api/mail/message/:uid`, `POST /api/mail/send`), authenticated with `Authorization: Bearer $ZAIM_API_KEY`. That's the whole contract an agent needs.
 
-## MCP server
+## Model Context Protocol (MCP) server
 
-For MCP clients (Claude Code, Codex, etc.), Zaim ships a stdio MCP server that
-exposes the mailbox as native tools — `zaim_status`, `zaim_folders`,
-`zaim_list`, `zaim_read`, `zaim_send`, `zaim_draft`, `zaim_delete` — so an agent
-manages mail through tool calls instead of shelling out. It's zero-dependency
-(pure Node, same as the CLI) and reads the same `ZAIM_URL` / `ZAIM_API_KEY`.
+Zaim supports the Model Context Protocol (MCP) across two distinct, production-ready transports:
 
-Register it with Claude Code:
+1. **Local `stdio` MCP** — for local CLI agents such as Claude Code, Codex, and Cursor.
+2. **Remote Streamable HTTP MCP** — for internet-connected AI clients, including ChatGPT-compatible MCP connectors, cloud agents, and multi-tenant platforms.
+
+Both transports share the same underlying tool registry and enforce server-side permission scopes so agents only execute what their API key permits.
+
+### Available MCP tools
+
+| Tool Name | Required Scope | Privileged? | Description |
+| :--- | :--- | :---: | :--- |
+| `zaim_status` | `mail.read` | No | Verify connection, configured mailbox, and granted scopes. |
+| `zaim_folders` | `mail.read` | No | List mailbox folders (`INBOX`, `Sent`, `Drafts`, `Trash`, etc.). |
+| `zaim_list` | `mail.search` | No | List and filter messages in a folder with read/flagged states. |
+| `zaim_read` | `mail.read` | No | Read a message in full by its UID (headers, body, attachment metadata). |
+| `zaim_draft` | `mail.draft` | No | Compose and save to Drafts via IMAP append (no SMTP; safe for review). |
+| `zaim_send` | `mail.send` | **Yes** | Send email immediately via SMTP and save a copy to Sent. |
+| `zaim_delete` | `mail.delete` | **Yes** | Move message to Trash or permanently expunge. |
+
+---
+
+### Local MCP (`stdio`)
+
+Run the zero-dependency stdio server directly:
+
+```bash
+node bin/zaim-mcp.mjs
+```
+
+Or configure Claude Code:
 
 ```bash
 claude mcp add zaim -s user \
   -e ZAIM_URL=https://mail.yourco.com \
-  -e ZAIM_API_KEY=zaim_… \
+  -e ZAIM_API_KEY=zaim_... \
   -- node /path/to/zaim/bin/zaim-mcp.mjs
 ```
 
-Or point any MCP client at `node bin/zaim-mcp.mjs` (stdio transport) with those
-two env vars set. `zaim_send` sends immediately; `zaim_draft` only ever writes
-to Drafts (no SMTP), so agent-prepared outreach can't go out unreviewed.
+---
+
+### Remote MCP (Streamable HTTP & SSE)
+
+Start the remote MCP server:
+
+```bash
+# Starts listening on http://0.0.0.0:3001/mcp
+npm run mcp:server
+```
+
+Or run via Node with custom environment variables:
+
+```bash
+ZAIM_URL=https://mail.yourdomain.com \
+ZAIM_MCP_HOST=0.0.0.0 \
+ZAIM_MCP_PORT=3001 \
+ZAIM_MCP_PATH=/mcp \
+node bin/zaim-mcp-server.mjs
+```
+
+#### Health check
+
+```bash
+curl http://localhost:3001/health
+# {"status":"ok","service":"zaim-mcp"}
+```
+
+#### Docker deployment
+
+Build and run with Docker:
+
+```bash
+docker build -t zaim-mcp -f Dockerfile.mcp .
+docker run -d \
+  -p 3001:3001 \
+  -e ZAIM_URL=https://mail.yourdomain.com \
+  zaim-mcp
+```
+
+Or use Docker Compose:
+
+```bash
+docker compose -f docker-compose.mcp.yml up -d
+```
+
+The service listens on `0.0.0.0` and respects platform-provided `$PORT` (Render, Railway, Fly.io, Kubernetes, VPS).
+
+---
+
+### Authentication & Permission Scopes
+
+Remote MCP clients authenticate on every request using standard HTTP headers:
+
+```http
+Authorization: Bearer <ZAIM_API_KEY>
+```
+
+#### Granular Scopes
+- `mail.read` — Read emails and view folder contents.
+- `mail.search` — List folders and search/filter messages.
+- `mail.draft` — Save drafts in the Drafts folder (zero sending risk).
+- `mail.send` — **Privileged**: Send emails immediately via SMTP.
+- `mail.delete` — **Privileged**: Delete or permanently expunge messages.
+- `mail.manage` (or `*`) — Full mailbox access.
+
+#### Security Recommendation: Scoped Keys for AI Clients
+Never grant raw mailbox credentials or blanket send/delete permissions to automated AI agents. Instead, mint scoped keys in Zaim:
+
+1. **`AI_READ_ONLY_KEY`** (`mail.read,mail.search`)
+   - For email summarization, inbox triage, and notification agents.
+   - Any attempt to call `zaim_send` or `zaim_delete` is rejected server-side with code `-32001 Permission denied`.
+2. **`AI_DRAFT_KEY`** (`mail.read,mail.search,mail.draft`)
+   - For outreach and email assistant agents that draft replies.
+   - The agent writes to `Drafts` so a human can inspect and approve before sending.
+3. **`AI_SEND_KEY`** (`mail.read,mail.send`)
+   - Reserved strictly for designated high-trust transactional sending agents.
+
+---
+
+### Connecting ChatGPT / Remote MCP Clients
+
+Remote clients connect over HTTPS to your public MCP endpoint:
+
+```text
+Endpoint URL: https://mcp.yourdomain.com/mcp
+Authentication: Bearer Token (ZAIM_API_KEY)
+```
+
+Example ChatGPT MCP connector / custom action configuration:
+- **Server URL**: `https://mcp.yourdomain.com/mcp`
+- **Auth Type**: Bearer
+- **Token**: `zaim_...` (Scoped Agent Key)
 
 ## Security posture
 

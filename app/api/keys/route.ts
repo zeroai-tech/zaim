@@ -17,11 +17,11 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const { uid, setCookie } = await ensureUserId(req)
   if (!uid) return json({ error: 'Unauthorized' }, 401)
-  let body: { label?: string; accountId?: string } = {}
+  let body: { label?: string; accountId?: string; scopes?: string[] } = {}
   try { body = await req.json() } catch { /* label optional */ }
   // 'mailbox' is the signed-in mailbox, which has no accounts row to pin to —
   // the key then simply follows whatever that user's default mailbox is.
   const accountId = body.accountId && body.accountId !== MAILBOX_ACCOUNT_ID ? body.accountId : undefined
-  const { row, secret } = await createApiKey(uid, body.label, accountId)
-  return withLink(json({ ok: true, id: row.id, label: row.label, secret }), { uid, setCookie })
+  const { row, secret } = await createApiKey(uid, body.label, accountId, body.scopes)
+  return withLink(json({ ok: true, id: row.id, label: row.label, scopes: row.scopes ? row.scopes.split(',') : null, secret }), { uid, setCookie })
 }

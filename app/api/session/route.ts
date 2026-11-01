@@ -40,12 +40,13 @@ export async function GET(req: Request) {
   const owner = await findByApiKey(provided)
   if (owner) {
     const account = await resolveAccount(owner.userId, owner.accountId || undefined)
-    return json({ authed: true, configured: !!account })
+    return json({ authed: true, configured: !!account, scopes: owner.scopes || ['*'] })
   }
 
   const key = apiKey()
   if (key && provided.length === key.length && crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(key))) {
-    return json({ authed: true, configured: isConfigured() })
+    const envScopes = process.env.ZAIM_SCOPES ? process.env.ZAIM_SCOPES.split(',').map(s => s.trim()).filter(Boolean) : ['*']
+    return json({ authed: true, configured: isConfigured(), scopes: envScopes })
   }
   return json({ authed: false, configured: false })
 }

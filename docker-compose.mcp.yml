@@ -1,0 +1,17 @@
+services:
+  zaim-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    image: zaim-mcp:latest
+    container_name: zaim-mcp-server
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - ZAIM_URL=${ZAIM_URL:-https://mail.yourdomain.com}
+      - ZAIM_API_KEY=${ZAIM_API_KEY:-}
+      - ZAIM_MCP_HOST=0.0.0.0
+      - ZAIM_MCP_PORT=3001
+      - ZAIM_MCP_PATH=/mcp
+      - ZAIM_SCOPES=${ZAIM_SCOPES:-*}

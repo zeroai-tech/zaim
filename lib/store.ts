@@ -66,7 +66,7 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_accounts_user ON accounts(user_id)`,
   `CREATE TABLE IF NOT EXISTS api_keys (
      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, label TEXT, key_hash TEXT UNIQUE NOT NULL,
-     account_id TEXT, created_at BIGINT NOT NULL, last_used BIGINT)`,
+     account_id TEXT, created_at BIGINT NOT NULL, last_used BIGINT, scopes TEXT)`,
   `CREATE INDEX IF NOT EXISTS idx_keys_hash ON api_keys(key_hash)`,
   // Preferences follow the person rather than the device, so Zaim looks the
   // same on a phone as on a desktop.
@@ -83,6 +83,7 @@ const SCHEMA = [
 // (SQLite has no ADD COLUMN IF NOT EXISTS, so we just ignore the "duplicate" error.)
 const MIGRATIONS = [
   'ALTER TABLE users ADD COLUMN avatar TEXT', // per-user profile picture (data URL)
+  'ALTER TABLE api_keys ADD COLUMN scopes TEXT', // granular agent permission scopes
 ]
 
 // Strip sslmode/ssl query params so the connection string can't force cert
@@ -321,30 +322,31 @@ export const usesVault = (): boolean => !!process.env.ZAIM_ENC_KEY || process.en
 // ── Per-user API keys (agent access) ─────────────────────────────────────────
 // The raw key is high-entropy random, so a fast SHA-256 hash is stored (shown
 // once, never recoverable). An optional account_id pins the key to one mailbox.
-export interface ApiKeyRow { id: string; user_id: string; label: string; account_id: string | null; created_at: number; last_used: number | null }
+export interface ApiKeyRow { id: string; user_id: string; label: string; account_id: string | null; created_at: number; last_used: number | null; scopes?: string | null }
 const hashKey = (raw: string) => crypto.createHash('sha256').update(raw).digest('hex')
 
-export async function createApiKey(userId: string, label?: string, accountId?: string): Promise<{ row: ApiKeyRow; secret: string }> {
+export async function createApiKey(userId: string, label?: string, accountId?: string, scopes?: string[]): Promise<{ row: ApiKeyRow; secret: string }> {
   const secret = 'zaim_' + crypto.randomBytes(24).toString('hex')
-  const row: ApiKeyRow = { id: id(), user_id: userId, label: label || 'Agent key', account_id: accountId || null, created_at: Date.now(), last_used: null }
-  await (await ready()).run('INSERT INTO api_keys (id,user_id,label,key_hash,account_id,created_at) VALUES ($1,$2,$3,$4,$5,$6)',
-    [row.id, row.user_id, row.label, hashKey(secret), row.account_id, row.created_at])
+  const scopesStr = scopes && scopes.length ? scopes.join(',') : null
+  const row: ApiKeyRow = { id: id(), user_id: userId, label: label || 'Agent key', account_id: accountId || null, created_at: Date.now(), last_used: null, scopes: scopesStr }
+  await (await ready()).run('INSERT INTO api_keys (id,user_id,label,key_hash,account_id,created_at,scopes) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+    [row.id, row.user_id, row.label, hashKey(secret), row.account_id, row.created_at, row.scopes || null])
   return { row, secret }
 }
 export const listApiKeys = async (userId: string): Promise<ApiKeyRow[]> =>
   NO_STORE ? [] :
-  (await ready()).all<ApiKeyRow>('SELECT id,user_id,label,account_id,created_at,last_used FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC', [userId])
+  (await ready()).all<ApiKeyRow>('SELECT id,user_id,label,account_id,created_at,last_used,scopes FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC', [userId])
 export async function revokeApiKey(userId: string, keyId: string) {
   await (await ready()).run('DELETE FROM api_keys WHERE id = $1 AND user_id = $2', [keyId, userId])
 }
-// Resolve a raw agent key → the owning user + pinned account (hash lookup).
-export async function findByApiKey(raw: string): Promise<{ userId: string; accountId: string | null } | null> {
+// Resolve a raw agent key → the owning user + pinned account + scopes (hash lookup).
+export async function findByApiKey(raw: string): Promise<{ userId: string; accountId: string | null; scopes: string[] | null } | null> {
   if (NO_STORE) return null
   const d = await ready()
-  const r = await d.get<{ id: string; user_id: string; account_id: string | null }>('SELECT id,user_id,account_id FROM api_keys WHERE key_hash = $1', [hashKey(raw)])
+  const r = await d.get<{ id: string; user_id: string; account_id: string | null; scopes: string | null }>('SELECT id,user_id,account_id,scopes FROM api_keys WHERE key_hash = $1', [hashKey(raw)])
   if (!r) return null
   await d.run('UPDATE api_keys SET last_used = $1 WHERE id = $2', [Date.now(), r.id])
-  return { userId: r.user_id, accountId: r.account_id }
+  return { userId: r.user_id, accountId: r.account_id, scopes: r.scopes ? r.scopes.split(',').map(s => s.trim()).filter(Boolean) : null }
 }
 
 

@@ -13,7 +13,7 @@ import { discover } from './discover'
 //   · that person's saved third-party mailboxes → the vault, when one is picked
 //   · an agent/CLI with an API key → the key's mailbox, or the env single-account
 // This is the one place account selection lives, so the mail routes stay simple.
-export type Resolved = { account: MailAccount; userId: string | null }
+export type Resolved = { account: MailAccount; userId: string | null; scopes?: string[] | null }
 
 export async function resolveForRequest(req: Request): Promise<{ ok: true; ctx: Resolved } | { ok: false; status: number; error: string }> {
   const uid = userIdFromReq(req)
@@ -72,14 +72,15 @@ export async function resolveForRequest(req: Request): Promise<{ ok: true; ctx: 
   if (owner) {
     const account = await resolveAccount(owner.userId, owner.accountId || undefined)
     if (!account) return { ok: false, status: 409, error: 'API key has no mailbox — connect one in Zaim.' }
-    return { ok: true, ctx: { account, userId: owner.userId } }
+    return { ok: true, ctx: { account, userId: owner.userId, scopes: owner.scopes } }
   }
 
   // 3) Legacy shared env key → env single-account (single-deployment / fallback).
   const key = apiKey()
   if (key && provided.length === key.length && crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(key))) {
     if (!isConfigured()) return { ok: false, status: 503, error: 'Server single-account not configured.' }
-    return { ok: true, ctx: { account: getAccount(), userId: null } }
+    const envScopes = process.env.ZAIM_SCOPES ? process.env.ZAIM_SCOPES.split(',').map(s => s.trim()).filter(Boolean) : null
+    return { ok: true, ctx: { account: getAccount(), userId: null, scopes: envScopes } }
   }
   return { ok: false, status: 401, error: 'Unauthorized' }
 }

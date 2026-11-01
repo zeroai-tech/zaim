@@ -7,6 +7,7 @@
   "bin": {
     "zaim": "./bin/zaim.mjs",
     "zaim-mcp": "./bin/zaim-mcp.mjs",
+    "zaim-mcp-server": "./bin/zaim-mcp-server.mjs",
     "zaim-login": "./bin/zaim-login.mjs"
   },
   "scripts": {
@@ -16,9 +17,11 @@
     "lint": "tsc --noEmit",
     "cli": "node ./bin/zaim.mjs",
     "mcp": "node ./bin/zaim-mcp.mjs",
+    "mcp:server": "node ./bin/zaim-mcp-server.mjs",
     "desktop:dev": "next build && electron .",
     "desktop:dist": "next build && node electron/stage.cjs && electron-builder",
     "test:offline": "node scripts/test-offline.cjs",
+    "test:mcp": "node scripts/test-mcp.cjs",
     "test:updates": "node scripts/test-updates.cjs"
   },
   "dependencies": {
@@ -40,7 +43,7 @@
     "@electron/rebuild": "^4.2.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/mailparser": "^3.4.6",
-    "@types/node": "^22.10.0",
+    "@types/node": "^22.20.5",
     "@types/nodemailer": "^6.4.17",
     "@types/pg": "^8.20.0",
     "@types/react": "^19.0.0",
@@ -51,7 +54,7 @@
     "playwright": "^1.61.1",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.7.2"
+    "typescript": "^5.9.3"
   },
   "main": "electron/main.cjs",
   "build": {
