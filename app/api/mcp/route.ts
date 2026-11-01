@@ -49,15 +49,23 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const url = new URL(req.url)
   const auth = req.headers.get('authorization') || ''
   const bearer = auth.startsWith('Bearer ') ? auth.slice(7).trim() : ''
+  const token = bearer || url.searchParams.get('key') || url.searchParams.get('token') || url.searchParams.get('api_key') || ''
 
-  if (!bearer) {
+  if (!token) {
     return new Response(
       JSON.stringify(
-        makeErrorResponse(null, -32000, 'Unauthorized: Missing `Authorization: Bearer <ZAIM_API_KEY>` header.')
+        makeErrorResponse(null, -32000, 'Unauthorized: Missing `Authorization: Bearer <ZAIM_API_KEY>` header or `?key=<ZAIM_API_KEY>` parameter.')
       ),
-      { status: 401, headers: corsHeaders({ 'content-type': 'application/json' }) }
+      {
+        status: 401,
+        headers: corsHeaders({
+          'content-type': 'application/json',
+          'WWW-Authenticate': 'Bearer error="invalid_token", error_description="Missing API key"',
+        }),
+      }
     )
   }
 
@@ -80,24 +88,23 @@ export async function POST(req: Request) {
 
   // Resolve scopes for this key
   let scopes: string[] | null = null
-  const owner = await findByApiKey(bearer)
+  const owner = await findByApiKey(token)
   if (owner) {
     scopes = owner.scopes
   } else {
     const serverKey = apiKey()
-    if (serverKey && bearer.length === serverKey.length && crypto.timingSafeEqual(Buffer.from(bearer), Buffer.from(serverKey))) {
+    if (serverKey && token.length === serverKey.length && crypto.timingSafeEqual(Buffer.from(token), Buffer.from(serverKey))) {
       scopes = process.env.ZAIM_SCOPES ? process.env.ZAIM_SCOPES.split(',').map((s) => s.trim()).filter(Boolean) : null
     }
   }
 
-  const url = new URL(req.url)
   const client = new ZaimApiClient({
     baseUrl: `${url.protocol}//${url.host}`,
   })
 
   const context = {
     client,
-    authToken: bearer,
+    authToken: token,
     scopes,
   }
 
