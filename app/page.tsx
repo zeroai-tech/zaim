@@ -164,6 +164,45 @@ export default function Zaim() {
   
   useEffect(() => { if (phase === 'app') load() }, [phase, activeAccount, activeFolder, activeMailbox])
 
+  // Keep the list current without anyone pressing Refresh: every 30 s while the tab is visible, and the
+  // moment the window comes back into view. It fetches the newest page quietly (no spinner), adds messages
+  // that arrived, and updates read/starred flags on the ones already shown, so paging and scrolling
+  // are not disturbed.
+  const quietBusy = useRef(false)
+  const quietRefresh = useCallback(() => {
+    if (!activeAccount || activeFolder === 'local-drafts' || quietBusy.current || document.visibilityState !== 'visible') return
+    quietBusy.current = true
+    const seq = loadSeq.current
+    api('/api/mail/list' + q({ limit: '40', page: '1', mailbox: activeMailbox, flagged: activeFolder === 'starred' ? '1' : undefined, account: activeAccount }))
+      .then((r) => {
+        if (!r.ok || seq !== loadSeq.current) return // a folder switch or full reload happened meanwhile
+        setOffline(!!r.cached)
+        const fresh: Msg[] = r.messages || []
+        setMessages((prev) => {
+          const byUid = new Map(fresh.map((m) => [m.uid, m]))
+          const known = new Set(prev.map((m) => m.uid))
+          const added = fresh.filter((m) => !known.has(m.uid))
+          let changed = added.length > 0
+          const kept = prev.map((m) => {
+            const f = byUid.get(m.uid)
+            if (f && (f.seen !== m.seen || f.flagged !== m.flagged)) { changed = true; return { ...m, seen: f.seen, flagged: f.flagged } }
+            return m
+          })
+          return changed ? [...added, ...kept] : prev
+        })
+      })
+      .catch(() => {})
+      .finally(() => { quietBusy.current = false })
+  }, [activeAccount, activeFolder, activeMailbox])
+  useEffect(() => {
+    if (phase !== 'app') return
+    const id = setInterval(quietRefresh, 30000)
+    const onShow = () => { if (document.visibilityState === 'visible') quietRefresh() }
+    document.addEventListener('visibilitychange', onShow)
+    window.addEventListener('focus', onShow)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', onShow); window.removeEventListener('focus', onShow) }
+  }, [phase, quietRefresh])
+
   // Commands from the native menu bar (New Message, Refresh, Find, panels).
   //
   // The menu dispatches a DOM event rather than talking over IPC, which keeps
